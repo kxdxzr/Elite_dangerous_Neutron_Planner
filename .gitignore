@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+build/
+dist/
+.venv/
+data/
+cache/
+*.log
+*favorites.json
+settings.json
+route_module_cache.json
