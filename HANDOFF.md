@@ -28,6 +28,13 @@
 
 ## 2. 用户确定的产品边界
 
+拆分基线后新增（尚未重新构建本地 EXE）：目的地命名收藏，独立保存于
+`destination_favorites.json`；界面支持收藏当前终点、设为终点、重命名及确认删除，
+名称冲突拒绝覆盖。保存不联网验证星系，也不开始规划。
+存储实现为 `src/destination_favorites.py`，对应单元测试及 GUI 测试已补充；
+当前源码隔离测试 51 项通过，源码离线冒烟通过（DPI awareness=1）。
+前述本地 EXE／CI 验证仍是拆分基线，不包含这次新功能。
+
 这是从筛选器迁出的**独立中子星／按配船航线规划工具**，不是新增筛选器功能。
 
 - 保留 Coriolis JSON / EDSY SLEF 导入、本地命名收藏、船型与普通／中子满油跳距预览。
@@ -86,7 +93,8 @@
 
 - Windows：`%LOCALAPPDATA%/EliteDangerousNeutronPlanner`。
 - 仅认 `ELITE_NEUTRON_DATA_DIR` 覆盖；不使用旧工具的 `ELITE_FILTER_DATA_DIR`。
-- `settings.json`：语言、主题、编辑参数、途经点；无路线收藏库／账号体系。
+- `settings.json`：语言、主题、编辑参数、途经点；无完整路线收藏库／账号体系。
+- `destination_favorites.json`：本地命名的目的地星系收藏，不含配船或完整路线。
 - `route_ship_favorites.json`：命名的配船 JSON；`route_module_cache.json`：按固定 revision 缓存 FSD 事实。
 - 旧收藏必须用户手动选择文件导入，原文件不改不删；同名冲突整体拒绝，不静默覆盖。
 - 旧缓存不迁移，按需重新获取。不得自动扫描个人 Journal 目录。

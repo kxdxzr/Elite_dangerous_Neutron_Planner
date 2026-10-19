@@ -3,8 +3,9 @@ import json
 import queue
 import threading
 import tkinter as tk
-from tkinter import filedialog, simpledialog
+from tkinter import filedialog, simpledialog, ttk as native_ttk
 
+from destination_favorites import DestinationFavorites, clean_text
 from localized_tk import ttk, messagebox, Toplevel
 from result_copy import copy_result
 from result_format import format_ly
@@ -228,6 +229,69 @@ def open_window(app, window=None):
         box.pack(side='left', padx=6)
         attach_system_suggest(box, variable)
 
+    destination_store = DestinationFavorites()
+    favorite_destination = tk.StringVar(win)
+    favorites_frame = ttk.LabelFrame(form, text='目的地收藏', padding=6)
+    favorites_frame.pack(fill='x', padx=8, pady=4)
+    # User-defined names are data, not translation catalogue keys.
+    destination_chooser = native_ttk.Combobox(favorites_frame, textvariable=favorite_destination,
+                                             state='readonly', width=32)
+    destination_chooser.pack(side='left', padx=4)
+
+    def reload_destinations(name=None):
+        try:
+            names = sorted(destination_store.load(), key=str.casefold)
+            destination_chooser.configure(values=names)
+            favorite_destination.set(name if name in names else names[0] if names else '')
+        except (OSError, ValueError, TypeError) as exc:
+            destination_chooser.configure(values=[])
+            favorite_destination.set('')
+            error(exc)
+
+    def save_destination():
+        try:
+            system = clean_text(destination.get())
+            name = simpledialog.askstring(tr('收藏当前终点'), tr('收藏名称'), initialvalue=system, parent=win)
+            if name is not None:
+                destination_store.put(name, system)
+                reload_destinations(name.strip())
+        except (OSError, ValueError, TypeError) as exc:
+            error(exc)
+
+    def use_destination():
+        if favorite_destination.get():
+            try:
+                destination.set(destination_store.load()[favorite_destination.get()])
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                error(exc)
+
+    def rename_destination():
+        old = favorite_destination.get()
+        if not old:
+            return
+        name = simpledialog.askstring(tr('重命名目的地'), tr('收藏名称'), initialvalue=old, parent=win)
+        if name is not None:
+            try:
+                destination_store.rename(old, name)
+                reload_destinations(name.strip())
+            except (OSError, ValueError, TypeError) as exc:
+                error(exc)
+
+    def delete_destination():
+        name = favorite_destination.get()
+        if name and messagebox.askyesno('确认', '删除所选目的地收藏？', parent=win):
+            try:
+                destination_store.delete(name)
+                reload_destinations()
+            except (OSError, ValueError, TypeError) as exc:
+                error(exc)
+
+    for label, command in (('收藏当前终点', save_destination), ('设为终点', use_destination),
+                           ('重命名目的地', rename_destination), ('删除目的地', delete_destination)):
+        ttk.Button(favorites_frame, text=label, command=command).pack(side='left', padx=4)
+    ttk.Label(form, text='目的地收藏仅保存在本地；保存时不联网验证星系，点击“设为终点”后可继续编辑。',
+              style='Muted.TLabel', wraplength=1360).pack(fill='x', padx=8)
+
     points_frame = ttk.LabelFrame(form, text='有序途经点', padding=6)
     points_frame.pack(fill='x', padx=8)
     box = ttk.Combobox(points_frame, textvariable=waypoint, width=35)
@@ -430,5 +494,9 @@ def open_window(app, window=None):
     win.ship_preview = preview
     win.ship_summary_variables = dict(identity=identity_text, ranges=range_text)
     win.build_editor, win.reload_favorites = editor, reload_favorites
+    win.destination_favorite_variable = favorite_destination
+    win.destination_chooser = destination_chooser
+    win.reload_destinations = reload_destinations
+    reload_destinations()
     reload_favorites()
     return win

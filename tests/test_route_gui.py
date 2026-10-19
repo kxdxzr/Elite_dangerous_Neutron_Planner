@@ -11,6 +11,7 @@ from unittest.mock import patch
 from test_route_tool import build, FSDS, Server
 import route_tool as tool
 import route_ship
+from destination_favorites import DestinationFavorites
 
 
 @unittest.skipUnless(sys.platform == 'win32' or os.environ.get('DISPLAY'), 'Requires a GUI display')
@@ -29,6 +30,9 @@ class RouteGuiTests(unittest.TestCase):
         self.store = tool.Favorites(str(Path(self.directory.name) / 'ships.json'))
         self.factory = patch.object(tool, 'Favorites', return_value=self.store)
         self.factory.start()
+        self.destinations = DestinationFavorites(str(Path(self.directory.name) / 'destinations.json'))
+        self.destination_factory = patch('route_gui.DestinationFavorites', return_value=self.destinations)
+        self.destination_factory.start()
         self.catalog = patch.object(route_ship, 'catalog', return_value=FSDS)
         self.catalog.start()
 
@@ -39,6 +43,7 @@ class RouteGuiTests(unittest.TestCase):
         self.root.destroy()
         gc.collect()
         self.factory.stop()
+        self.destination_factory.stop()
         self.catalog.stop()
         self.directory.cleanup()
         self.assertEqual(self.errors, [])
@@ -177,3 +182,44 @@ class RouteGuiTests(unittest.TestCase):
         warning.assert_called_once()
         plan.assert_not_called()
         self.assertFalse(win.route_state['busy'])
+
+    def test_destination_favorites_save_reuse_rename_delete_and_language(self):
+        win = self.app.route_window()
+        buttons = {getattr(w, '_raw_text', ''): w for w in self.widgets(win) if isinstance(w, self.gui.ttk.Button)}
+        win.route_variables['destination'].set(' Colonia ')
+        with patch('route_gui.simpledialog.askstring', return_value='探索基地'), patch.object(tool, 'plan') as plan:
+            buttons['收藏当前终点'].invoke()
+            plan.assert_not_called()
+        self.assertEqual(self.destinations.load(), {'探索基地': 'Colonia'})
+        self.assertEqual(win.destination_favorite_variable.get(), '探索基地')
+        win.route_variables['destination'].set('Sol')
+        buttons['设为终点'].invoke()
+        self.assertEqual(win.route_variables['destination'].get(), 'Colonia')
+        self.app.set_language('en')
+        self.assertEqual(buttons['收藏当前终点'].cget('text'), 'Save current destination')
+        with patch('route_gui.simpledialog.askstring', return_value='Home'):
+            buttons['重命名目的地'].invoke()
+        self.assertEqual(self.destinations.load(), {'Home': 'Colonia'})
+        # Reloading persisted favourites never replaces an edited destination.
+        win.route_variables['destination'].set('Sirius')
+        win.reload_destinations()
+        self.assertEqual(win.route_variables['destination'].get(), 'Sirius')
+        with patch('route_gui.messagebox.askyesno', return_value=False):
+            buttons['删除目的地'].invoke()
+        self.assertEqual(self.destinations.load(), {'Home': 'Colonia'})
+        with patch('route_gui.messagebox.askyesno', return_value=True):
+            buttons['删除目的地'].invoke()
+        self.assertEqual(self.destinations.load(), {})
+        self.assertEqual(win.destination_favorite_variable.get(), '')
+
+    def test_destination_favorites_reject_conflict_and_cancel_save(self):
+        self.destinations.put('Home', 'Sol')
+        win = self.app.route_window()
+        buttons = {getattr(w, '_raw_text', ''): w for w in self.widgets(win) if isinstance(w, self.gui.ttk.Button)}
+        win.route_variables['destination'].set('Colonia')
+        with patch('route_gui.simpledialog.askstring', return_value='home'), patch('route_gui.messagebox.showerror') as error:
+            buttons['收藏当前终点'].invoke()
+            error.assert_called_once()
+        with patch('route_gui.simpledialog.askstring', return_value=None):
+            buttons['收藏当前终点'].invoke()
+        self.assertEqual(self.destinations.load(), {'Home': 'Sol'})

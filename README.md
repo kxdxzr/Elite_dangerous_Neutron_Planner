@@ -11,11 +11,19 @@ A standalone Windows desktop neutron-assisted route planner, extracted from
 This is not an official Frontier or Spansh application. No GitHub Release has been
 published yet; Windows CI builds are available in Actions artifacts after CI passes.
 
+**This is only a small desktop extension of [Spansh's existing ship-specific route
+planner](https://spansh.co.uk/exact-plotter). At its core, it still uses Spansh's
+planning service; it is not a separately developed route-planning algorithm.**
+This project mainly adds local ship and destination favourites, sequential calls
+for ordered waypoint legs, and desktop UI/export conveniences. Spansh performs
+the actual route calculations and deserves credit for the core planning capability.
+
 ## Features
 
 - Import one Coriolis JSON / EDSY SLEF build and keep named local ship favourites.
 - Ship-specific Spansh exact routing, neutron boost enabled by default.
 - Ordered editable waypoints, cargo, fuel reserve, injection and routing options.
+- Named local destination favourites: reuse as destination, rename and confirm deletion; duplicate names never overwrite.
 - Normal/neutron full-tank range preview; sortable results, copying and CSV export.
 - English / 中文, system/light/dark theme, Windows system-DPI awareness.
 - Independent saved settings and explicit import of old favourites.
@@ -48,6 +56,11 @@ Click **Import legacy ship favourites**, then select `route_ship_favorites.json`
 from the old filter's data directory (source runs: its `data/` folder). The old
 file is not changed or deleted. Conflicting names abort without overwriting.
 Old module caches are not moved; they are fetched again when needed.
+
+Enter a destination system, click **Save current destination**, and give it a name.
+Select a favourite and click **Use as destination** to reuse it. Favourites persist
+across restarts in a separate `destination_favorites.json` file. Saving does not
+validate systems online or start planning; systems are resolved when planning.
 
 Planning sends the selected build and waypoints to Spansh. Avoid private fields
 you do not want to transmit. Previewing a ship does not submit a route job.

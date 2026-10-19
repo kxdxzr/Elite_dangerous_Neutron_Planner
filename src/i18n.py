@@ -2,6 +2,16 @@
 import re
 
 CATALOG = {
+    '目的地收藏': 'Destination favourites', '收藏当前终点': 'Save current destination',
+    '设为终点': 'Use as destination', '重命名目的地': 'Rename destination', '删除目的地': 'Delete destination',
+    '删除所选目的地收藏？': 'Delete the selected destination favourite?',
+    '目的地收藏仅保存在本地；保存时不联网验证星系，点击“设为终点”后可继续编辑。':
+        'Destination favourites stay local. Saving does not validate systems online; use a favourite as the destination to edit it.',
+    '收藏名称和星系须为非空单行文本，最多256个字符。':
+        'Favourite names and systems must be non-empty single-line text of at most 256 characters.',
+    '目的地收藏文件无效，未覆盖原文件。': 'Invalid destination favourites file; it has not been overwritten.',
+    '目的地收藏名称已存在，请使用其他名称。': 'That destination favourite name already exists. Choose another name.',
+    '未找到目的地收藏。': 'Destination favourite not found.',
     '导入旧版舰船收藏': 'Import legacy ship favourites', '导入完成': 'Import complete',
     '候选星系': 'Candidate systems',
     '任务来源控制派系：': 'Mission source controlling factions: ',
