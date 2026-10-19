@@ -2,6 +2,8 @@
 
 [English](README.md) · [简体中文](README_zh-CN.md)
 
+Maintainers / next sessions: start with [AGENTS.md](AGENTS.md) and [HANDOFF.md](HANDOFF.md).
+
 A standalone Windows desktop neutron-assisted route planner, extracted from
 [Elite Dangerous Filter](https://github.com/kxdxzr/Elite_dangerous_Filter).
 

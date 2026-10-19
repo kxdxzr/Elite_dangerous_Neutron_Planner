@@ -2,6 +2,8 @@
 
 [English](README.md) · [简体中文](README_zh-CN.md)
 
+维护者／接手 session：请先阅读 [AGENTS.md](AGENTS.md) 与[维护交接说明](HANDOFF.md)。
+
 从 [Elite Dangerous 筛选器](https://github.com/kxdxzr/Elite_dangerous_Filter) 拆分的独立桌面工具。
 
 **初始拆分 Beta：0.1.0-beta.1。涉及 UI 重构与拆分，不保证没有潜在 Bug。**
