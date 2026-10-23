@@ -6,7 +6,7 @@ A small Windows desktop tool for Elite Dangerous players: keep favourite ship bu
 
 **This is only a small desktop extension of [Spansh's existing ship-specific route planner](https://spansh.co.uk/exact-plotter). At its core, it still uses Spansh's planning service, not a separately developed planning algorithm.** Spansh performs the actual route calculations and deserves credit for the core planning capability. If you do not need local favourites or a desktop interface, you can simply use the Spansh website.
 
-This is not an official Frontier or Spansh product. The current version is **0.1.0-beta.1 (Beta)** and may contain bugs. Check your route and fuel situation in-game.
+This is not an official Frontier or Spansh product. The current version is **0.1.0** and may contain bugs. Check your route and fuel situation in-game.
 
 ## What you can do
 
@@ -22,11 +22,11 @@ This is not an official Frontier or Spansh product. The current version is **0.1
 
 ## Download and launch
 
-There is no published Release package yet. Windows test builds are available on the [Actions build page](https://github.com/kxdxzr/Elite_dangerous_Neutron_Planner/actions/workflows/ci.yml):
+Download version **0.1.0** from the [Release page](https://github.com/kxdxzr/Elite_dangerous_Neutron_Planner/releases/tag/v0.1.0):
 
-1. Sign in to GitHub and open the latest successful build.
-2. Under **Artifacts** at the bottom of the page, download `EliteDangerousNeutronPlanner-Windows`.
-3. Extract the archive and run `EliteDangerousNeutronPlanner.exe`. Python is not required.
+1. Under **Assets**, download `EliteDangerousNeutronPlanner-Windows-v0.1.0.zip`.
+2. Extract the archive and run `EliteDangerousNeutronPlanner.exe`. Python is not required.
+3. Optional: use `SHA256SUMS.txt` to verify downloaded files. Source code and licensing notices are also provided.
 
 The first ship-attribute calculation needs an internet connection to fetch module data. Route planning requires a connection to Spansh.
 

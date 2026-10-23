@@ -3,7 +3,7 @@ from datetime import datetime
 
 PROJECT_AUTHOR = 'kxdxzr'
 PROJECT_NAME = 'Elite_dangerous_Neutron_Planner'
-PROJECT_VERSION = '0.1.0-beta.1'
+PROJECT_VERSION = '0.1.0'
 PROJECT_URL = 'https://github.com/kxdxzr/Elite_dangerous_Neutron_Planner'
 
 

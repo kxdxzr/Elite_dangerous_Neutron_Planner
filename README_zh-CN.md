@@ -6,7 +6,7 @@
 
 **它只是对 [Spansh 已有的舰船航线规划工具](https://spansh.co.uk/exact-plotter)做了一点桌面端扩展，本质上仍然是使用 Spansh 的规划服务，并非另写了一套规划算法。** 实际航线计算由 Spansh 完成，核心规划能力归功于 Spansh。如果不需要本地收藏和桌面操作，直接使用 Spansh 网页即可。
 
-本工具非 Frontier／Spansh 官方产品。当前版本为 **0.1.0-beta.1（测试版）**，可能存在 Bug，请在游戏中核对路线和燃油情况。
+本工具非 Frontier／Spansh 官方产品。当前版本为 **0.1.0**，可能存在 Bug，请在游戏中核对路线和燃油情况。
 
 ## 能做什么
 
@@ -22,11 +22,11 @@
 
 ## 下载与启动
 
-目前尚未发布正式的 Release 安装包，Windows 测试版可从 [Actions 构建页面](https://github.com/kxdxzr/Elite_dangerous_Neutron_Planner/actions/workflows/ci.yml)下载：
+从 [Release 页面](https://github.com/kxdxzr/Elite_dangerous_Neutron_Planner/releases/tag/v0.1.0)下载 **0.1.0**：
 
-1. 登录 GitHub，打开最近一次成功的构建。
-2. 在页面底部 **Artifacts** 下载 `EliteDangerousNeutronPlanner-Windows`。
-3. 解压后运行 `EliteDangerousNeutronPlanner.exe`，无需安装 Python。
+1. 在 **Assets** 下载 `EliteDangerousNeutronPlanner-Windows-v0.1.0.zip`。
+2. 解压后运行 `EliteDangerousNeutronPlanner.exe`，无需安装 Python。
+3. 可选：使用 `SHA256SUMS.txt` 校验下载文件；页面也提供源码和许可说明。
 
 配船属性首次解析需要联网获取模组数据；航线规划需要连接 Spansh。
 

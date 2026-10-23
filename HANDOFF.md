@@ -8,11 +8,16 @@
 - GitHub：https://github.com/kxdxzr/Elite_dangerous_Neutron_Planner
 - 分支：`main`，远端 `origin`；使用 `git status` / `git log -3` 查看实时状态。
 - 拆分基线提交：`1d3413462f0d31554e0ce35772a90fd44485311a`。
-- 独立版本：`0.1.0-beta.1`，位于 `src/export_metadata.py`。
-- 已推送并通过 Windows CI；**没有创建 GitHub Release，也没有发布版本标签**。
+- 独立版本：`0.1.0`，位于 `src/export_metadata.py`。
+- 用户已明确授权发布 `v0.1.0` Release；发布包包含 Windows EXE、源码及 SHA-256 校验文件。
 - CI 基线：https://github.com/kxdxzr/Elite_dangerous_Neutron_Planner/actions/runs/39213832840
 - Windows 构建附件：该运行的 `EliteDangerousNeutronPlanner-Windows` artifact。
 - 本地 EXE：`dist/EliteDangerousNeutronPlanner.exe`，不纳入 Git。
+
+v0.1.0 发布验证：95 项隔离测试通过；源码与重新构建 EXE 的离线冒烟通过，
+EXE 报告版本 `0.1.0`、`frozen=true`、DPI awareness=1。发布不包含悬浮窗，
+未使用私人配船做在线测试。发布说明保留满油分段／日志隐私／剪贴板警告，
+并披露跳距预览辅助油箱质量处理与 EDSY 存在小幅差异（本次未修正物理公式）。
 
 2026-10-23 用户授权将当前代码打包并上传：本轮重新运行 95 项隔离测试全部通过，
 源码与新构建 EXE 离线冒烟均 `ok=true`（EXE `frozen=true`、DPI awareness=1），
