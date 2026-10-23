@@ -1,5 +1,6 @@
 """Local ship favourites and Spansh online, ordered multi-leg exact routing."""
 import json
+import csv
 import queue
 import threading
 import tkinter as tk
@@ -10,11 +11,12 @@ from localized_tk import ttk, messagebox, Toplevel
 from result_copy import copy_result
 from result_format import format_ly
 from search_progress import SearchProgress
-from route_history import RouteHistory, build_key, request_key, find_complete
+from route_history import RouteHistory, build_key, request_key, find_complete, validate_leg_overrides
 from route_position import RoutePosition
 import route_ship
 import route_tool as tool
 import journal_location
+import journal_ship
 
 
 def open_window(app, window=None):
@@ -33,6 +35,7 @@ def open_window(app, window=None):
         ('supercharge', True), ('already_supercharged', False), ('exclude_secondary', False), ('refuel_every_scoopable', False))}
     stop, events = threading.Event(), queue.Queue()
     state = {'busy': False, 'info': None, 'points': [], 'result_key': None, 'pending': None, 'cached_at': None}
+    map_window = None
     history_store = RouteHistory()
     history = []
     preview = {'generation': 0, 'identity': None, 'params': None, 'error': '', 'fsds': None}
@@ -101,7 +104,7 @@ def open_window(app, window=None):
             selected.set('')
             error(exc)
 
-    def editor(existing=None):
+    def editor(existing=None, imported=None):
         dialog = Toplevel(win)
         dialog.title('编辑舰船配置')
         width = min(850, max(480, dialog.winfo_screenwidth() - 80))
@@ -130,6 +133,12 @@ def open_window(app, window=None):
         horizontal = ttk.Scrollbar(body, orient='horizontal', command=text.xview)
         horizontal.grid(row=1, column=0, sticky='ew')
         text.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
+        if imported is not None:
+            text.insert('1.0', imported.raw)
+            identity = route_ship.ship_identity(imported.raw)
+            name.set(identity['name'] or identity['model'])
+            hint.configure(text=(tr('本地日志配船，请核对后保存；未自动覆盖收藏。') + '\n' +
+                                 imported.timestamp + ' | ' + imported.filename))
         if existing:
             try:
                 text.insert('1.0', store.load()[existing])
@@ -196,6 +205,99 @@ def open_window(app, window=None):
     for label, command in (('新增舰船配置', editor), ('编辑舰船配置', lambda: editor(selected.get()) if selected.get() else editor()),
                            ('重命名', rename), ('删除收藏', delete)):
         ttk.Button(ship_actions, text=label, command=command).pack(side='left', padx=4)
+    ship_reading = {'busy': False}
+
+    def history_picker(report):
+        dialog = Toplevel(win)
+        dialog.title('选择历史配船')
+        dialog.geometry('1000x520')
+        dialog.minsize(650, 350)
+        ttk.Label(dialog, text='历史配船可能过时或已出售，不代表当前船库；选择一艘后核对并保存，不会自动收藏。',
+                  wraplength=950).pack(fill='x', padx=8, pady=8)
+        ttk.Label(dialog, text=(tr('扫描结果') + f': {len(report.ships)} | ' +
+                  tr('跳过无效或无法确认身份的记录') + f': {report.skipped}' +
+                  (' | ' + tr('已达扫描上限，列表可能不完整。') if report.limited else '')),
+                  wraplength=950).pack(fill='x', padx=8)
+        commanders = {}
+        for ship in report.ships:
+            commanders.setdefault(ship.commander_id, ship.commander_name)
+        choices = {f'{index + 1}. {name or tr("情况未知")}': ident
+                   for index, (ident, name) in enumerate(commanders.items())}
+        selected_commander = tk.StringVar(dialog, value=next(iter(choices), ''))
+        row = ttk.Frame(dialog, padding=8)
+        row.pack(fill='x')
+        ttk.Label(row, text='指挥官').pack(side='left')
+        combo = native_ttk.Combobox(row, textvariable=selected_commander, values=list(choices),
+                                   state='readonly', width=45)
+        combo.pack(side='left', padx=8)
+        body = ttk.Frame(dialog, padding=8)
+        body.pack(fill='both', expand=True)
+        table = ttk.Treeview(body, columns=('model', 'name', 'ident', 'id', 'time'),
+                             show='headings', selectmode='browse')
+        for column, label in (('model', '船型'), ('name', '舰船名称'), ('ident', '舰船识别码'),
+                              ('id', '舰船编号'), ('time', '日志时间')):
+            table.heading(column, text=label)
+            table.column(column, width=200 if column == 'time' else 150, minwidth=80)
+        scroll = ttk.Scrollbar(body, orient='vertical', command=table.yview)
+        horizontal = ttk.Scrollbar(body, orient='horizontal', command=table.xview)
+        table.configure(yscrollcommand=scroll.set, xscrollcommand=horizontal.set)
+        body.rowconfigure(0, weight=1)
+        body.columnconfigure(0, weight=1)
+        table.grid(row=0, column=0, sticky='nsew')
+        scroll.grid(row=0, column=1, sticky='ns')
+        horizontal.grid(row=1, column=0, sticky='ew')
+
+        def populate(*_):
+            table.delete(*table.get_children())
+            commander = choices.get(selected_commander.get())
+            for index, ship in enumerate(report.ships):
+                if ship.commander_id == commander:
+                    identity = route_ship.ship_identity(ship.snapshot.raw)
+                    table.insert('', 'end', iid=str(index), values=(identity['model'], identity['name'],
+                                 identity['ident'], ship.ship_id, ship.snapshot.timestamp))
+
+        combo.bind('<<ComboboxSelected>>', populate)
+
+        def choose():
+            selection = table.selection()
+            if len(selection) == 1:
+                snapshot = report.ships[int(selection[0])].snapshot
+                dialog.destroy()
+                editor(imported=snapshot)
+
+        buttons = ttk.Frame(dialog, padding=8)
+        buttons.pack(fill='x')
+        ttk.Button(buttons, text='查看所选配船并收藏', command=choose).pack(side='right')
+        populate()
+        dialog.ship_table, dialog.commander_choice = table, selected_commander
+        dialog.commander_combo, dialog.choose_ship = combo, choose
+        return dialog
+
+    def read_ship(history=False):
+        if ship_reading['busy']:
+            return
+        directory = app.journal_directory or journal_location.default_directory()
+        ship_reading['busy'] = True
+        ship_read_button.configure(state='disabled')
+        ship_history_button.configure(state='disabled')
+
+        def worker():
+            try:
+                result = (journal_ship.read_ship_history(directory, preview_closed) if history else
+                          journal_ship.read_current_ship(directory))
+                if not preview_closed.is_set():
+                    events.put(('journal_ship', (result, None)))
+            except (OSError, ValueError, TypeError) as exc:
+                if not preview_closed.is_set():
+                    events.put(('journal_ship', (None, str(exc))))
+        threading.Thread(target=worker, daemon=True, name='journal-ship').start()
+
+    ship_read_button = ttk.Button(ship_actions, text='读取当前配船', command=read_ship)
+    ship_read_button.pack(side='left', padx=4)
+    ship_history_button = ttk.Button(ship_actions, text='读取历史配船', command=lambda: read_ship(history=True))
+    ship_history_button.pack(side='left', padx=4)
+    ttk.Label(ships, text='仅点击时读取最新日志会话的配船，不依赖 EDMC；请先在游戏中切换到目标舰船。日志目录可在起点区域选择。',
+              wraplength=1300, style='Muted.TLabel').pack(fill='x', padx=4, pady=4)
     ttk.Label(form, text='收藏仅保存在本地；开始规划后，舰船配置和航点将发送至 Spansh。首次解析需要联网获取 FSD 数据。',
               wraplength=1360, style='Muted.TLabel').pack(fill='x', padx=8)
 
@@ -401,6 +503,7 @@ def open_window(app, window=None):
             points.insert('', 'end', iid=str(index), values=(index + 1, name))
         if select is not None and 0 <= select < len(state['points']):
             points.selection_set(str(select))
+        render_legs()
 
     def add_point():
         name = waypoint.get().strip()
@@ -440,7 +543,153 @@ def open_window(app, window=None):
     for index, (key, label) in enumerate((('supercharge', '使用中子增压'), ('already_supercharged', '第一段已增压'),
                                         ('exclude_secondary', '排除副星'), ('refuel_every_scoopable', '遇可补油恒星即补油'))):
         ttk.Checkbutton(flags_frame, text=label, variable=flags[key]).grid(row=index // 2, column=index % 2, sticky='w', padx=4)
-    ttk.Label(result_area, text=tool.FULL_TANK_NOTE, style='Warning.TLabel', wraplength=1360).pack(fill='x', padx=8, pady=4)
+
+    leg_state = dict(topology=None, overrides=[], dialog=None)
+    leg_area = ttk.LabelFrame(form, text='分段配船（开始规划前配置）', padding=8)
+    leg_area.pack(fill='x', padx=8, pady=6)
+    ttk.Label(leg_area, text='默认各段沿用统一配船、货物和储备燃油；选中分段可单独配置。所有段校验完成后才开始查询。',
+              wraplength=1300).pack(fill='x')
+    leg_table = ttk.Treeview(leg_area, columns=('leg', 'source', 'destination', 'ship', 'cargo', 'reserve'),
+                             show='headings', height=3, selectmode='browse', sortable=False)
+    for key, label in (('leg', '分段编号'), ('source', '起点星系'), ('destination', '终点星系'),
+                       ('ship', '本段配船'), ('cargo', '货物 t'), ('reserve', '储备燃油 t')):
+        leg_table.heading(key, text=label)
+        leg_table.column(key, width=65 if key == 'leg' else 180, minwidth=50)
+    leg_table.pack(fill='x')
+    leg_notice = tk.StringVar(win)
+    ttk.Label(leg_area, textvariable=leg_notice, wraplength=1300, style='Warning.TLabel').pack(fill='x')
+    ttk.Label(leg_area, text='每段独立满油；不验证途经点是否能换船或补油，请自行确认。',
+              wraplength=1300, style='Warning.TLabel').pack(fill='x')
+
+    def topology():
+        return [source.get().strip(), *state['points'], destination.get().strip()]
+
+    def render_legs(*_):
+        route = topology()
+        if route != leg_state['topology']:
+            if any(entry['enabled'] for entry in leg_state['overrides']):
+                leg_notice.set(tr('航点已变化，各段恢复统一设置，请重新核对分段配置。'))
+            leg_state['topology'] = route
+            leg_state['overrides'] = [dict(source=a, destination=b, enabled=False,
+                                            selected='', cargo='', reserve='') for a, b in zip(route, route[1:])]
+        selection = leg_table.selection()
+        leg_table.delete(*leg_table.get_children())
+        for index, entry in enumerate(leg_state['overrides']):
+            own = entry['enabled']
+            leg_table.insert('', 'end', iid=str(index), values=(index + 1, route[index], route[index + 1],
+                entry['selected'] if own else f"{tr('沿用统一设置')}: {selected.get()}",
+                entry['cargo'] if own else cargo.get(), entry['reserve'] if own else reserve.get()))
+        if selection and leg_table.exists(selection[0]):
+            leg_table.selection_set(selection[0])
+
+    def edit_leg():
+        if state['busy']:
+            return
+        if leg_state['dialog'] is not None and leg_state['dialog'].winfo_exists():
+            leg_state['dialog'].lift()
+            return
+        picked = leg_table.selection()
+        if not picked:
+            return
+        index = int(picked[0])
+        entry = dict(leg_state['overrides'][index])
+        route = list(leg_state['topology'])
+        dialog = Toplevel(win)
+        leg_state['dialog'] = dialog
+        def close_editor(event):
+            if event.widget is dialog and leg_state['dialog'] is dialog:
+                leg_state['dialog'] = None
+                # Break the public test/UI hook cycle while still on Tk's main
+                # thread; a later worker must not finalize these Tk variables.
+                if hasattr(dialog, 'leg_variables'):
+                    dialog.leg_variables.clear()
+                if hasattr(dialog, 'apply_leg'):
+                    del dialog.apply_leg
+        dialog.bind('<Destroy>', close_editor, add='+')
+        dialog.title('单独配置分段')
+        ttk.Label(dialog, text=f"{index + 1}. {route[index]} → {route[index + 1]}",
+                  wraplength=650).pack(fill='x', padx=8, pady=8)
+        enabled = tk.BooleanVar(dialog, value=entry['enabled'])
+        own_ship = tk.StringVar(dialog, value=entry['selected'] if entry['enabled'] else selected.get())
+        own_cargo = tk.StringVar(dialog, value=entry['cargo'] if entry['enabled'] else cargo.get())
+        own_reserve = tk.StringVar(dialog, value=entry['reserve'] if entry['enabled'] else reserve.get())
+        controls = []
+        def toggle():
+            for widget in controls:
+                widget.configure(state=('readonly' if isinstance(widget, native_ttk.Combobox) else 'normal')
+                                 if enabled.get() else 'disabled')
+        ttk.Checkbutton(dialog, text='此段单独配置', variable=enabled, command=toggle).pack(anchor='w', padx=8)
+        try:
+            names = sorted(store.load(), key=str.casefold)
+        except (OSError, ValueError) as exc:
+            dialog.destroy()
+            error(exc)
+            return
+        for label, variable in (('本段配船', own_ship), ('货物 t', own_cargo), ('储备燃油 t', own_reserve)):
+            row = ttk.Frame(dialog, padding=8)
+            row.pack(fill='x')
+            ttk.Label(row, text=label).pack(side='left')
+            widget = (native_ttk.Combobox(row, textvariable=variable, values=names, width=40) if variable is own_ship
+                      else ttk.Entry(row, textvariable=variable, width=20))
+            widget.pack(side='right', fill='x', expand=True, padx=8)
+            controls.append(widget)
+        toggle()
+
+        def apply():
+            if topology() != route:
+                error(tr('航点已变化，请关闭并重新配置该分段。'))
+                return
+            try:
+                if enabled.get():
+                    if own_ship.get() not in store.load():
+                        raise ValueError(tr('请先选择舰船配置'))
+                    route_ship.numeric(own_cargo.get(), 'Cargo')
+                    route_ship.numeric(own_reserve.get(), 'Reserve fuel')
+                leg_state['overrides'][index] = dict(source=route[index], destination=route[index + 1],
+                    enabled=enabled.get(), selected=own_ship.get(), cargo=own_cargo.get(), reserve=own_reserve.get())
+                leg_notice.set('')
+                render_legs()
+                dialog.destroy()
+            except (OSError, ValueError) as exc:
+                error(exc)
+        ttk.Button(dialog, text='应用分段配置', command=apply).pack(padx=8, pady=8)
+        dialog.leg_variables = dict(enabled=enabled, selected=own_ship, cargo=own_cargo, reserve=own_reserve)
+        dialog.apply_leg = apply
+        return dialog
+
+    ttk.Button(leg_area, text='配置所选分段', command=edit_leg).pack(anchor='w', pady=4)
+
+    def restore_leg_overrides(entries, ships=None):
+        render_legs()
+        try:
+            validate_leg_overrides(entries)
+            if not entries:
+                for entry in leg_state['overrides']:
+                    entry.update(enabled=False, selected='', cargo='', reserve='', build_key='')
+                render_legs()
+                return
+            if len(entries) != len(leg_state['overrides']) or any(
+                    (entry['source'], entry['destination']) != (a, b)
+                    for entry, a, b in zip(entries, topology(), topology()[1:])):
+                if entries:
+                    raise ValueError('Leg endpoints no longer match.')
+                return
+            restored = [dict(entry) for entry in entries]
+            if ships is not None:
+                for entry in restored:
+                    if entry['enabled'] and entry.get('build_key'):
+                        matches = [name for name, raw in ships.items() if build_key(raw) == entry['build_key']]
+                        entry['selected'] = entry['selected'] if entry['selected'] in matches else matches[0] if matches else ''
+            leg_state['overrides'] = restored
+            render_legs()
+        except (ValueError, TypeError, KeyError):
+            leg_notice.set(tr('分段配置无法恢复，请重新核对。'))
+
+    leg_traces = [(variable, variable.trace_add('write', render_legs))
+                  for variable in (source, destination, selected, cargo, reserve)]
+    app.localizer.register(render_legs)
+    result_warning = tk.StringVar(win, value=tr(tool.FULL_TANK_NOTE))
+    ttk.Label(result_area, textvariable=result_warning, style='Warning.TLabel', wraplength=1360).pack(fill='x', padx=8, pady=4)
 
     status = tk.StringVar(win, value='选择收藏舰船，填写起终点；途经点按列表顺序规划。')
     ttk.Label(result_area, textvariable=status, wraplength=1360).pack(fill='x', padx=8)
@@ -510,7 +759,10 @@ def open_window(app, window=None):
             if next_system is not None:
                 text += f" | {tr('计划下一跳')}: {next_system}"
             else:
-                text += ' | ' + tr('已到达终点' if state['info']['complete'] else '已到已验证路线末尾（路线未完成）')
+                label = ('已到达终点' if state['info']['complete'] else
+                         '已到 CSV 文件末尾（不代表完整航线终点）' if state['info'].get('imported') else
+                         '已到已验证路线末尾（路线未完成）')
+                text += ' | ' + tr(label)
             if auto_copy.get() and position.should_copy:
                 try:
                     win.clipboard_clear()
@@ -528,6 +780,8 @@ def open_window(app, window=None):
                 text = tr('读取日志位置失败，等待重试。')
         if follow_text.get() != text:
             follow_text.set(text)
+        if map_window is not None:
+            map_window.sync()
 
     def restart_follow():
         follow_state['stop'].set()
@@ -588,6 +842,8 @@ def open_window(app, window=None):
         if not win.winfo_exists():
             return
         selection = tree.selection()
+        result_warning.set(tr('导入路线仅依据 CSV 记录，不确认配船、满油、完整性或实际可行性。')
+                           if state['info'] and state['info'].get('imported') else tr(tool.FULL_TANK_NOTE))
         tree.delete(*tree.get_children())
         # Let short routes fit naturally, but keep long routes bounded so Tk
         # does not need an enormous native child window. Their scrollbar remains.
@@ -604,7 +860,9 @@ def open_window(app, window=None):
             info = state['info']
             en = app.localizer.language == 'en'
             status.set((f"Completed legs: {len(info['segments']):,}/{info['planned_segments']:,}; " if en else
-                        f"已完成分段：{len(info['segments']):,}/{info['planned_segments']:,}；") + app.localizer.tr(info['reason']))
+                         f"已完成分段：{len(info['segments']):,}/{info['planned_segments']:,}；") + app.localizer.tr(info['reason']))
+            if info.get('imported'):
+                status.set(tr(info['reason']) + ' | ' + info.get('import_filename', ''))
             if state['cached_at']:
                 status.set(status.get() + f" | {tr('历史结果，未重新查询')}: {state['cached_at']}")
             timing = info.get('timings')
@@ -649,6 +907,7 @@ def open_window(app, window=None):
         selected.set(name)
         state.update(points=list(entry['points']), info=entry['result'], result_key=entry['key'], cached_at=entry['created'])
         render_points()
+        restore_leg_overrides(entry['parameters'].get('leg_overrides', []), ships)
         tracker.finish(entry['result']['complete'])
         render_results()
         if not name:
@@ -660,7 +919,11 @@ def open_window(app, window=None):
         if state['busy']:
             return
         try:
-            raw = store.load().get(selected.get())
+            if leg_state['dialog'] is not None and leg_state['dialog'].winfo_exists():
+                raise ValueError(tr('请先应用分段配置或关闭配置窗口，再开始规划。'))
+            render_legs()
+            ships = store.load()
+            raw = ships.get(selected.get())
             if raw is None:
                 raise ValueError(tr('请先选择舰船配置'))
             route_points = [source.get().strip(), *state['points'], destination.get().strip()]
@@ -668,7 +931,20 @@ def open_window(app, window=None):
                 raise ValueError(tr('请填写起点和终点星系'))
             options = tool.Options(cargo=cargo.get(), reserve=reserve.get(), injection=injections[injection.get()],
                                    algorithm=algorithms[algorithm.get()], **{k: v.get() for k, v in flags.items()}).validate()
-            key = request_key(raw, route_points, options)
+            configs, saved_overrides = [], []
+            for number, entry in enumerate(leg_state['overrides'], 1):
+                own = entry['enabled']
+                name = entry['selected'] if own else selected.get()
+                leg_raw = ships.get(name)
+                if leg_raw is None or own and entry.get('build_key') and build_key(leg_raw) != entry['build_key']:
+                    raise ValueError(tr('分段配船已删除或修改，请重新配置。') + f' ({number})')
+                route_ship.decode_build(leg_raw)
+                config = dict(raw=leg_raw, name=name,
+                              cargo=route_ship.numeric(entry['cargo'] if own else options.cargo, 'Cargo'),
+                              reserve=route_ship.numeric(entry['reserve'] if own else options.reserve, 'Reserve fuel'))
+                configs.append(config)
+                saved_overrides.append(dict(entry, build_key=build_key(leg_raw) if own else ''))
+            key = request_key(raw, route_points, options, configs if any(e['enabled'] for e in saved_overrides) else None)
         except (OSError, ValueError) as exc:
             error(exc)
             return
@@ -688,6 +964,7 @@ def open_window(app, window=None):
             return
         stop.clear()
         parameters = {key: variable.get() for key, variable in win.route_variables.items() if key != 'waypoint'}
+        parameters['leg_overrides'] = saved_overrides
         state.update(busy=True, info=None, result_key=None, cached_at=None,
                      pending=dict(key=key, ship_key=build_key(raw), parameters=parameters, points=list(state['points'])))
         tree.delete(*tree.get_children())
@@ -699,7 +976,7 @@ def open_window(app, window=None):
         def worker():
             try:
                 result = tool.plan(raw, route_points, options, stop,
-                                   lambda text, detail: events.put(('progress', (text, detail))))
+                                   lambda text, detail: events.put(('progress', (text, detail))), leg_configs=configs)
             except Exception as exc:
                 result = dict(complete=False, rows=[], segments=[], planned_segments=len(route_points) - 1,
                               reason=str(exc), failed_segment=None, full_tank_each_segment=True)
@@ -711,7 +988,9 @@ def open_window(app, window=None):
         if not info or not info['rows']:
             messagebox.showinfo('提示', '暂无结果', parent=win)
             return
-        if not info['complete'] and not messagebox.askyesno('确认', '航线未完成，仅导出已完成分段？', parent=win):
+        confirmation = ('导入航线的完整性未确认，仍要导出文件中的记录？' if info.get('imported') else
+                        '航线未完成，仅导出已完成分段？')
+        if not info['complete'] and not messagebox.askyesno('确认', confirmation, parent=win):
             return
         path = filedialog.asksaveasfilename(parent=win, defaultextension='.csv', filetypes=[('CSV', '*.csv')])
         if path:
@@ -720,12 +999,47 @@ def open_window(app, window=None):
             except OSError as exc:
                 error(exc)
 
+    def import_route():
+        if state['busy']:
+            return
+        path = filedialog.askopenfilename(parent=win, filetypes=[('CSV', '*.csv'), ('All', '*.*')])
+        if not path:
+            return
+        state['busy'] = True
+        stop.clear()
+        start_button.configure(state='disabled')
+        stop_button.configure(state='normal')
+        import_button.configure(state='disabled')
+        status.set(tr('正在导入 CSV（不联网）…'))
+        def worker():
+            try:
+                from route_csv import import_csv
+                info = import_csv(path, stop)
+                events.put(('csv_import', (info, None)))
+            except (OSError, ValueError, csv.Error) as exc:
+                events.put(('csv_import', (None, str(exc))))
+        threading.Thread(target=worker, daemon=True, name='csv-import').start()
+
     start_button = ttk.Button(actions, text='规划航线', command=run)
     start_button.pack(side='left')
     stop_button = ttk.Button(actions, text='停止', command=stop.set, state='disabled')
     stop_button.pack(side='left', padx=5)
     ttk.Button(actions, text='复制星系名', command=lambda: copy_result(win, tree, 'name')).pack(side='left', padx=5)
     ttk.Button(actions, text='导出 CSV', command=export).pack(side='left', padx=5)
+    import_button = ttk.Button(actions, text='导入路线 CSV', command=import_route)
+    import_button.pack(side='left', padx=5)
+    def show_map():
+        nonlocal map_window
+        if map_window is None or map_window.closed:
+            from route_map import RouteMap
+            map_window = RouteMap(win, app, lambda: state['info'], lambda: position.index)
+        else:
+            map_window.win.deiconify()
+            map_window.win.lift()
+            map_window.sync()
+        return map_window
+    ttk.Button(actions, text='俯视路线图', command=show_map).pack(side='left', padx=5)
+    win.show_route_map = show_map
     poll_id = None
     def poll():
         nonlocal poll_id, history
@@ -739,6 +1053,35 @@ def open_window(app, window=None):
                     if generation == preview['generation']:
                         preview.update(params=params, error=failure)
                         render_preview()
+                elif event == 'journal_ship':
+                    imported, failure = result
+                    ship_reading['busy'] = False
+                    ship_read_button.configure(state='normal')
+                    ship_history_button.configure(state='normal')
+                    if failure:
+                        error(tr(failure))
+                    elif isinstance(imported, journal_ship.ShipHistory):
+                        history_picker(imported)
+                    else:
+                        editor(imported=imported)
+                elif event == 'csv_import':
+                    imported, failure = result
+                    state['busy'] = False
+                    start_button.configure(state='normal')
+                    stop_button.configure(state='disabled')
+                    import_button.configure(state='normal')
+                    if failure:
+                        status.set(tr('CSV 导入失败，原结果未更改。'))
+                        error(failure)
+                    else:
+                        # Loading a file is not consent to copy a new route's
+                        # next system or scan Journals. Re-enable explicitly.
+                        follow_enabled.set(False)
+                        auto_copy.set(False)
+                        restart_follow()
+                        state.update(info=imported, result_key=None, cached_at=None)
+                        tracker.finish(imported['complete'])
+                        render_results()
                 elif event == 'progress':
                     text, detail = result
                     status.set(text)
@@ -787,11 +1130,14 @@ def open_window(app, window=None):
             follow_state['stop'].set()
             selected.trace_remove('write', selected_trace)
             cargo.trace_remove('write', cargo_trace)
+            for variable, trace in leg_traces:
+                variable.trace_remove('write', trace)
             app.localizer.callbacks.discard(render_preview)
             app.localizer.callbacks.discard(render_results)
             app.localizer.callbacks.discard(render_history)
             app.localizer.callbacks.discard(render_journal)
             app.localizer.callbacks.discard(refresh_follow)
+            app.localizer.callbacks.discard(render_legs)
             for sequence in ('<MouseWheel>', '<Button-4>', '<Button-5>'):
                 win.unbind_class(wheel_tag, sequence)
             if poll_id is not None:
@@ -802,6 +1148,8 @@ def open_window(app, window=None):
     win.route_variables = dict(source=source, destination=destination, waypoint=waypoint, selected=selected,
                                cargo=cargo, reserve=reserve, algorithm=algorithm, injection=injection, **flags)
     win.render_points = render_points
+    win.leg_state, win.leg_table, win.leg_notice = leg_state, leg_table, leg_notice
+    win.edit_leg, win.render_legs, win.restore_leg_overrides = edit_leg, render_legs, restore_leg_overrides
     win.ship_preview = preview
     win.ship_summary_variables = dict(identity=identity_text, ranges=range_text)
     win.build_editor, win.reload_favorites = editor, reload_favorites

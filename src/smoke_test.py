@@ -27,11 +27,30 @@ def run(report_path):
             win = app.route_window(as_root=True)
             assert win is root
             assert not any(variable.get() for variable in win.follow_variables.values())
+            preview = win.show_route_map()
+            root.update_idletasks()
+            assert preview.points == []
+            preview.win.destroy()
+            assert preview.closed
+            from route_csv import import_csv
+            sample = Path(directory) / 'offline-route.csv'
+            sample.write_text('System Name,Distance,Distance Remaining,Fuel Left,Fuel Used,Refuel,Neutron Star\n'
+                              'A,0,10,32,0,No,No\nB,10,0,31,1,No,Yes\n', encoding='utf-8')
+            win.route_state['info'] = import_csv(sample)
+            win.render_results()
+            assert len(win.result_tree.get_children()) == 2
+            exported = Path(directory) / 'roundtrip.csv'
+            route_tool.export_csv(exported, win.route_state['info'])
+            assert not import_csv(exported)['import_state_known']
+            win.route_state['info'] = None
+            win.render_results()
             win.route_variables['destination'].set('Alpha Centauri')
             win.route_variables['cargo'].set('17')
             win.route_state['points'] = ['Lave']
             app.journal_directory = str(Path(directory) / 'chosen-journals')
             win.render_points()
+            win.leg_state['overrides'][1].update(enabled=True, selected='Offline smoke ship', cargo='3', reserve='1')
+            win.render_legs()
             assert not win.waypoint_tree._sortable
             for mode in ('dark', 'light', 'system', 'dark'):
                 app.set_appearance(mode)
@@ -52,6 +71,9 @@ def run(report_path):
             assert win.route_variables['cargo'].get() == '17'
             assert win.route_variables['destination'].get() == 'Alpha Centauri'
             assert win.route_state['points'] == ['Lave']
+            assert win.leg_state['overrides'][1]['enabled']
+            assert win.leg_state['overrides'][1]['selected'] == 'Offline smoke ship'
+            assert win.leg_state['overrides'][1]['cargo'] == '3'
             assert app.journal_directory == str(Path(directory) / 'chosen-journals')
             assert not any(variable.get() for variable in win.follow_variables.values())
             follower.assert_not_called()

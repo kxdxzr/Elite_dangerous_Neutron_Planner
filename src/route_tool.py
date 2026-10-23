@@ -10,7 +10,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from collections import OrderedDict
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait as wait_futures
 
@@ -21,6 +21,7 @@ from result_format import format_ly, format_number
 
 BASE = 'https://spansh.co.uk/api'
 FULL_TANK_NOTE = '本段起点按满油计算；途经点不保证能补油'
+SHIP_SWAP_NOTE = '此处更换配船；不保证当地可换船，请自行确认'
 
 
 class SystemCache:
@@ -282,7 +283,8 @@ def validate_jumps(jumps, source, destination):
                 route_ship.numeric(row[key], key)
 
 
-def plan(raw, points, options, stop=None, progress=None, http=http_json, fsds=None, wait=None, resolver_cache=None):
+def plan(raw, points, options, stop=None, progress=None, http=http_json, fsds=None, wait=None, resolver_cache=None,
+         leg_configs=None):
     options = copy.deepcopy(options).validate()
     if len(points) < 2 or any(not isinstance(p, str) or not p.strip() for p in points):
         raise ValueError('Enter a start, destination and non-empty waypoints.')
@@ -300,7 +302,31 @@ def plan(raw, points, options, stop=None, progress=None, http=http_json, fsds=No
     try:
         check_stop(stop)
         emit('准备舰船参数与航点', total=1, stage='配船处理')
-        ship = route_ship.parse_ship(raw, fsds if fsds is not None else route_ship.catalog(http))
+        catalogue = fsds if fsds is not None else route_ship.catalog(http)
+        # Freeze and validate *every* leg before resolving systems or submitting
+        # any route. Never discover a bad later ship after paying for leg one.
+        configs = copy.deepcopy(leg_configs) if leg_configs is not None else [
+            dict(raw=raw, name='', cargo=options.cargo, reserve=options.reserve) for _ in points[1:]]
+        if not isinstance(configs, list) or len(configs) != len(points) - 1:
+            raise ValueError('Each route leg requires one ship configuration.')
+        prepared, parsed = [], {}
+        for number, config in enumerate(configs, 1):
+            check_stop(stop)
+            try:
+                if not isinstance(config, dict) or not isinstance(config.get('name', ''), str):
+                    raise ValueError('Invalid leg ship configuration.')
+                build = config['raw']
+                if build not in parsed:
+                    parsed[build] = route_ship.parse_ship(build, catalogue)
+                ship = parsed[build]
+                leg_options = replace(options, cargo=config['cargo'], reserve=config['reserve']).validate()
+                if leg_options.reserve >= ship['tank_size']:
+                    raise ValueError('Reserve fuel must be less than main tank capacity.')
+                prepared.append((ship, build, config.get('name', ''), leg_options))
+                emit('正在校验所有分段配船…', number, len(configs), '配船处理')
+            except (KeyError, TypeError, ValueError) as exc:
+                info['failed_segment'] = number
+                raise ValueError(f'{number}: {exc}') from None
         timings[phase] = time.monotonic() - phase_started
         phase, phase_started = 'resolve_seconds', time.monotonic()
         emit('正在解析航点…', total=len(set(p.casefold() for p in points)), stage='星系解析')
@@ -309,10 +335,11 @@ def plan(raw, points, options, stop=None, progress=None, http=http_json, fsds=No
         timings[phase] = time.monotonic() - phase_started
         phase, phase_started = 'route_seconds', time.monotonic()
         for leg, (source, destination) in enumerate(zip(resolved, resolved[1:]), 1):
+            ship, leg_raw, ship_name, leg_options = prepared[leg - 1]
             info['failed_segment'] = leg
             check_stop(stop)
             emit(f"{source['name']} → {destination['name']}", leg - 1)
-            request = payload(ship, raw, source, destination, options, leg)
+            request = payload(ship, leg_raw, source, destination, leg_options, leg)
             def poll_progress(state):
                 stage = 'Spansh 排队' if state in ('queued', 'unstarted') else 'Spansh 计算'
                 emit(f"{source['name']} → {destination['name']}", leg - 1, stage=stage)
@@ -320,13 +347,18 @@ def plan(raw, points, options, stop=None, progress=None, http=http_json, fsds=No
             validate_jumps(jumps, source, destination)
             check_stop(stop)
             rows = [dict(copy.deepcopy(row), segment=leg, job=job, waypoint=False,
+                         ship_name=ship_name, cargo=leg_options.cargo, reserve=leg_options.reserve,
+                         departure_ship='', departure_cargo='', departure_reserve='',
                          departure_segment='', departure_fuel='', full_tank_start=False) for row in jumps]
-            rows[0].update(departure_segment=leg, departure_fuel=ship['tank_size'], full_tank_start=True)
+            departure = dict(departure_segment=leg, departure_fuel=ship['tank_size'], full_tank_start=True,
+                             departure_ship=ship_name, departure_cargo=leg_options.cargo, departure_reserve=leg_options.reserve)
+            rows[0].update(departure)
             rows[-1]['waypoint'] = leg < len(points) - 1
             if info['rows']:
                 boundary = info['rows'][-1]
                 # Keep previous-leg arrival fuel and next-leg assumed departure fuel separate.
-                boundary.update(departure_segment=leg, departure_fuel=ship['tank_size'], full_tank_start=True)
+                boundary.update(departure)
+                boundary['ship_change'] = prepared[leg - 2][1] != leg_raw
                 boundary['_next_leg_start'] = copy.deepcopy(jumps[0])
                 # Departure actions must come from the next leg, not the old terminal
                 # row. Otherwise merging could silently drop a required injection.
@@ -334,7 +366,8 @@ def plan(raw, points, options, stop=None, progress=None, http=http_json, fsds=No
                     boundary[key] = jumps[0].get(key)
                 rows = rows[1:]
             info['rows'].extend(rows)
-            info['segments'].append(dict(number=leg, source=source['name'], destination=destination['name'], job=job))
+            info['segments'].append(dict(number=leg, source=source['name'], destination=destination['name'], job=job,
+                                         ship_name=ship_name, cargo=leg_options.cargo, reserve=leg_options.reserve))
             emit(f"{source['name']} → {destination['name']}", leg)
         info.update(complete=True, failed_segment=None, reason='航线规划完成')
     except InterruptedError as exc:
@@ -351,7 +384,11 @@ COLUMNS = [('step', '序号'), ('segment', '分段编号'), ('name', '星系'), 
            ('distance_to_destination', '距本段终点 ly'), ('fuel_in_tank', '本段到达剩余燃油 t'),
            ('fuel_used', '本跳燃油 t'), ('must_refuel', '需要补油'), ('has_neutron', '中子星'),
            ('must_inject', '需要注入'), ('waypoint', '途经点'), ('departure_segment', '出发分段'),
-           ('departure_fuel', '假定出发燃油 t'), ('assumption', '分段出发假设')]
+            ('departure_fuel', '假定出发燃油 t'),
+            ('ship_name', '本段配船'), ('cargo', '本段货物 t'), ('reserve', '本段储备燃油 t'),
+             ('departure_ship', '出发配船'), ('departure_cargo', '出发货物 t'), ('departure_reserve', '出发储备燃油 t'),
+             ('x', 'X'), ('y', 'Y'), ('z', 'Z'),
+            ('assumption', '分段出发假设')]
 
 
 def display_rows(info, tr=lambda x: x):
@@ -360,9 +397,11 @@ def display_rows(info, tr=lambda x: x):
     output = []
     for step, row in enumerate(info['rows'], 1):
         data = dict(row, step=f'{step:,}', assumption=tr(FULL_TANK_NOTE) if row['full_tank_start'] else '')
+        if row.get('ship_change'):
+            data['assumption'] += ' | ' + tr(SHIP_SWAP_NOTE)
         for key in ('distance', 'distance_to_destination'):
             data[key] = format_ly(row.get(key))
-        for key in ('fuel_in_tank', 'fuel_used', 'departure_fuel'):
+        for key in ('fuel_in_tank', 'fuel_used', 'departure_fuel', 'cargo', 'reserve', 'departure_cargo', 'departure_reserve'):
             data[key] = format_number(row.get(key))
         for key in ('must_refuel', 'has_neutron', 'must_inject', 'waypoint'):
             data[key] = flag(row.get(key))
@@ -371,6 +410,7 @@ def display_rows(info, tr=lambda x: x):
 
 
 def export_csv(path, info, tr=None, language='zh'):
+    from route_csv import STATE_MARKER, table_digest
     if tr is None:
         from i18n import translate
         tr = lambda text: translate(text, language)
@@ -378,6 +418,14 @@ def export_csv(path, info, tr=None, language='zh'):
         writer = csv.writer(file)
         write_csv_provenance(writer, len(COLUMNS), language)
         writer.writerow([tr(title) for _, title in COLUMNS])
+        exported = []
         for values in display_rows(info, tr):
-            row = values
-            writer.writerow(["'" + v if isinstance(v, str) and v.startswith(('=', '+', '-', '@')) else v for v in row])
+            row = ["'" + v if isinstance(v, str) and v.startswith(("'", '=', '+', '-', '@'))
+                   else '' if v is None else str(v) for v in values]
+            writer.writerow(row)
+            exported.append(row)
+        metadata = dict(complete=info['complete'], planned_segments=info['planned_segments'],
+                        failed_segment=info.get('failed_segment'), full_tank_each_segment=info.get('full_tank_each_segment'),
+                        status_known=info.get('import_state_known', True),
+                        row_count=len(exported), table_sha256=table_digest(exported))
+        writer.writerow([STATE_MARKER, json.dumps(metadata, separators=(',', ':'))] + [''] * (len(COLUMNS) - 2))

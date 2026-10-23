@@ -18,6 +18,10 @@ from route_history import RouteHistory
 @unittest.skipUnless(sys.platform == 'win32' or os.environ.get('DISPLAY'), 'Requires a GUI display')
 class RouteGuiTests(unittest.TestCase):
     def setUp(self):
+        import gc
+        # Prior synchronous Tk test classes may leave unreachable Tcl cycles.
+        # Reclaim those here before this class starts any background workers.
+        gc.collect()
         import planner_app as gui
         self.gui = gui
         self.root = gui.tk.Tk()
@@ -45,6 +49,10 @@ class RouteGuiTests(unittest.TestCase):
         for callback in self.root.tk.splitlist(self.root.tk.call('after', 'info')):
             self.root.tk.call('after', 'cancel', callback)
         self.root.destroy()
+        # Drop test-owned Tk roots before collecting on the main thread. Leaving
+        # them on the completed TestCase lets a later worker trigger Tcl GC.
+        self.app = None
+        self.root = None
         gc.collect()
         self.factory.stop()
         self.destination_factory.stop()
@@ -57,6 +65,329 @@ class RouteGuiTests(unittest.TestCase):
         for child in parent.winfo_children():
             yield child
             yield from self.widgets(child)
+
+    def test_journal_build_import_is_explicit_and_requires_save_confirmation(self):
+        import journal_ship
+        from test_journal_ship import loadout
+        imported = journal_ship.JournalShip(journal_ship.convert_loadout(loadout()),
+                                            loadout()['timestamp'], 'Journal.synthetic.01.log')
+        self.store.put('Explorer', json.dumps(build()))
+        original = self.store.load()
+        with patch('journal_ship.read_current_ship', return_value=imported) as reader, \
+                patch.object(tool, 'http_json') as http, patch.object(tool, 'plan') as plan:
+            win = self.app.route_window()
+            self.app.journal_directory = 'synthetic-folder'
+            reader.assert_not_called()
+            button = next(w for w in self.widgets(win)
+                          if getattr(w, '_raw_text', '') == '读取当前配船')
+            button.invoke()
+            self.wait_for(lambda: any(hasattr(w, 'json_text') for w in win.winfo_children()))
+            dialog = next(w for w in win.winfo_children() if hasattr(w, 'json_text'))
+            reader.assert_called_once_with('synthetic-folder')
+            self.assertEqual(dialog.name_variable.get(), 'Explorer')
+            self.assertEqual(dialog.json_text.get('1.0', 'end-1c'), imported.raw)
+            self.assertEqual(self.store.load(), original)
+            with patch('route_gui.messagebox.askyesno', return_value=False) as confirm:
+                dialog.save_build()
+                confirm.assert_called_once()
+            self.assertEqual(self.store.load(), original)
+            dialog.name_variable.set('Journal Explorer')
+            dialog.save_build()
+            self.assertEqual(self.store.load()['Journal Explorer'], imported.raw)
+            self.assertEqual(self.store.load()['Explorer'], original['Explorer'])
+            plan.assert_not_called()
+            http.assert_not_called()
+
+    def test_journal_build_failure_preserves_favourites_and_can_retry(self):
+        with patch('journal_ship.read_current_ship', side_effect=ValueError('No snapshot')) as reader, \
+                patch('route_gui.messagebox.showerror') as failure:
+            win = self.app.route_window()
+            button = next(w for w in self.widgets(win)
+                          if getattr(w, '_raw_text', '') == '读取当前配船')
+            button.invoke()
+            self.wait_for(lambda: failure.called)
+            self.assertEqual(self.store.load(), {})
+            self.assertFalse(any(hasattr(w, 'json_text') for w in win.winfo_children()))
+            self.assertNotIn('disabled', button.state())
+            self.app.set_language('en')
+            self.assertEqual(button.cget('text'), 'Read current ship build')
+            self.assertEqual(reader.call_count, 1)
+
+    def test_historical_builds_are_filtered_and_only_selected_build_is_saved(self):
+        import journal_ship
+        from test_journal_ship import loadout
+        first = journal_ship.JournalShip(journal_ship.convert_loadout(loadout()),
+                                         loadout()['timestamp'], 'Journal.synthetic.01.log')
+        other = dict(loadout(), ShipName='Other commander ship')
+        second = journal_ship.JournalShip(journal_ship.convert_loadout(other),
+                                          other['timestamp'], 'Journal.other.01.log')
+        report = journal_ship.ShipHistory((journal_ship.HistoricalShip('F1', 'One', 1, first),
+                                          journal_ship.HistoricalShip('F2', 'Two', 1, second)), True, 2)
+        with patch('journal_ship.read_ship_history', return_value=report) as reader, \
+                patch.object(tool, 'http_json') as http, patch.object(tool, 'plan') as plan:
+            win = self.app.route_window()
+            reader.assert_not_called()
+            button = next(w for w in self.widgets(win) if getattr(w, '_raw_text', '') == '读取历史配船')
+            button.invoke()
+            self.wait_for(lambda: any(hasattr(w, 'ship_table') for w in win.winfo_children()))
+            picker = next(w for w in win.winfo_children() if hasattr(w, 'ship_table'))
+            self.assertEqual(self.store.load(), {})
+            self.assertEqual(picker.ship_table.get_children(), ('0',))
+            picker.choose_ship()  # No implicit selection or automatic saving.
+            self.assertTrue(picker.winfo_exists())
+            picker.commander_combo.current(1)
+            picker.commander_combo.event_generate('<<ComboboxSelected>>')
+            self.root.update()
+            self.assertEqual(picker.ship_table.get_children(), ('1',))
+            picker.ship_table.selection_set('1')
+            self.app.set_language('en')
+            self.assertEqual(button.cget('text'), 'Read historical ship builds')
+            picker.choose_ship()
+            dialog = next(w for w in win.winfo_children() if hasattr(w, 'json_text'))
+            self.assertEqual(dialog.json_text.get('1.0', 'end-1c'), second.raw)
+            self.assertEqual(self.store.load(), {})
+            dialog.save_build()
+            self.assertEqual(self.store.load(), {'Other commander ship': second.raw})
+            http.assert_not_called()
+            plan.assert_not_called()
+
+    def test_history_picker_close_and_empty_scan_do_not_save_anything(self):
+        import journal_ship
+        with patch('journal_ship.read_ship_history', return_value=journal_ship.ShipHistory((), False, 0)):
+            win = self.app.route_window()
+            button = next(w for w in self.widgets(win) if getattr(w, '_raw_text', '') == '读取历史配船')
+            button.invoke()
+            self.wait_for(lambda: any(hasattr(w, 'ship_table') for w in win.winfo_children()))
+            picker = next(w for w in win.winfo_children() if hasattr(w, 'ship_table'))
+            picker.choose_ship()
+            self.assertEqual(picker.ship_table.get_children(), ())
+            picker.destroy()
+            self.assertEqual(self.store.load(), {})
+            self.assertNotIn('disabled', button.state())
+
+    def test_route_map_offline_order_gaps_following_theme_and_cleanup(self):
+        from types import SimpleNamespace
+        win = self.follow_window(['Z', 'B', 'A', 'End'], complete=False)
+        rows = win.route_state['info']['rows']
+        rows[0].update(x=0, z=0)
+        rows[1].update(x=10, z=20, must_refuel=True, waypoint=True)
+        rows[3].update(x=50, z=40)
+        win.render_results()
+        with patch.object(tool, 'http_json') as http, patch.object(tool, 'plan') as plan, \
+                patch.object(win, 'clipboard_clear') as clipboard:
+            preview = win.show_route_map()
+            self.root.update()
+            self.assertIs(win.show_route_map(), preview)
+            self.assertEqual(preview.points, [(0, 0), (10, 20), None, (50, 40)])
+            self.assertEqual(len(preview.canvas.find_withtag('route_line')), 1)
+            self.assertEqual(len(preview.canvas.find_withtag('refuel')), 1)
+            self.assertIn('未完成', preview.summary.get())
+            win.result_tree.sort_by('name')
+            self.root.update_idletasks()
+            self.assertEqual(preview.rows[0]['name'], 'Z')
+            win.follow_variables['enabled'].set(True)
+            self.feed_position(win, 'B')
+            self.assertEqual(len(preview.canvas.find_withtag('current')), 1)
+            scale = preview.view.scale
+            preview.wheel(SimpleNamespace(x=200, y=200, delta=120))
+            self.assertGreater(preview.view.scale, scale)
+            preview.start_drag(SimpleNamespace(x=100, y=100))
+            old = preview.view.ox
+            preview.pan(SimpleNamespace(x=130, y=110))
+            self.assertEqual(preview.view.ox, old + 30)
+            point = preview.screen_points[1]
+            preview.inspect(SimpleNamespace(x=point[0], y=point[1]))
+            self.assertIn('B', preview.hover.get())
+            self.feed_position(win, 'Off route')
+            self.assertEqual(preview.canvas.find_withtag('current'), ())
+            self.app.set_language('en')
+            self.assertIn('Incomplete route', preview.summary.get())
+            self.app.set_appearance('dark')
+            preview.sync()
+            self.assertEqual(preview.canvas.cget('background'), self.app.appearance_manager.palette['surface'])
+            http.assert_not_called()
+            plan.assert_not_called()
+            clipboard.assert_not_called()
+            preview.win.destroy()
+            self.assertTrue(preview.closed)
+            self.assertNotIn(preview.draw, self.app.localizer.callbacks)
+
+    def test_route_map_missing_coordinates_and_route_replacement(self):
+        win = self.app.route_window()
+        preview = win.show_route_map()
+        self.root.update()
+        self.assertEqual(preview.points, [])
+        from test_route_history import result
+        info = result(True)
+        info['rows'] = [dict(name='A', x=1, z=2, full_tank_start=False),
+                        dict(name='B', x=2, z=3, full_tank_start=False)]
+        win.route_state['info'] = info
+        win.render_results()
+        self.assertEqual(preview.points, [(1, 2), (2, 3)])
+        self.assertEqual(len(preview.canvas.find_withtag('route_line')), 1)
+        win.route_state['info'] = None
+        win.render_results()
+        self.assertEqual(preview.points, [])
+        self.assertEqual(preview.canvas.find_withtag('route_line'), ())
+        win.destroy()
+        self.assertTrue(preview.closed)
+
+    def leg_window(self):
+        self.store.put('Shared', json.dumps(build()))
+        other = build()
+        other['data']['UnladenMass'] = 500
+        other['data']['FuelCapacity']['Main'] = 16
+        self.store.put('Other', json.dumps(other))
+        win = self.app.route_window()
+        win.route_variables['selected'].set('Shared')
+        win.route_variables['source'].set('A')
+        win.route_variables['destination'].set('C')
+        win.route_state['points'] = ['B']
+        win.render_points()
+        return win
+
+    def configure_leg(self, win, index=1, name='Other', cargo='7', reserve='3'):
+        win.leg_table.selection_set(str(index))
+        editor = win.edit_leg()
+        for key, value in dict(enabled=True, selected=name, cargo=cargo, reserve=reserve).items():
+            editor.leg_variables[key].set(value)
+        editor.apply_leg()
+        return editor
+
+    def test_legs_inherit_by_default_override_individually_and_reset_on_topology_change(self):
+        win = self.leg_window()
+        self.assertFalse(win.leg_table._sortable)
+        self.assertFalse(any(entry['enabled'] for entry in win.leg_state['overrides']))
+        self.configure_leg(win)
+        win.route_variables['cargo'].set('4')
+        self.assertEqual(win.leg_table.item('0', 'values')[4], '4')
+        self.assertEqual(win.leg_table.item('1', 'values')[4], '7')
+        self.assertEqual(win.leg_table.item('1', 'values')[3], 'Other')
+        win.route_variables['selected'].set('Other')
+        self.assertIn('Other', win.leg_table.item('0', 'values')[3])
+        self.app.set_language('en')
+        self.assertIn('Inherit', win.leg_table.item('0', 'values')[3])
+        win.route_state['points'] = ['Elsewhere']
+        win.render_points()
+        self.assertFalse(any(entry['enabled'] for entry in win.leg_state['overrides']))
+        self.assertIn('Route points changed', win.leg_notice.get())
+
+    def test_all_leg_configuration_is_frozen_before_planning_and_duplicate_is_ignored(self):
+        win = self.leg_window()
+        self.configure_leg(win)
+        buttons = {getattr(w, '_raw_text', ''): w for w in self.widgets(win)}
+        server, original = Server(), tool.plan
+        received = []
+        def offline(raw, points, options, stop, progress, **kwargs):
+            received.append(kwargs['leg_configs'])
+            return original(raw, points, options, stop, progress, http=server, fsds=FSDS, **kwargs)
+        with patch.object(tool, 'plan', side_effect=offline) as plan, \
+                patch('route_gui.messagebox.askyesno', return_value=True):
+            buttons['规划航线'].invoke()
+            self.wait_for(lambda: not win.route_state['busy'])
+            self.assertTrue(win.route_state['info']['complete'])
+            self.assertEqual([c['name'] for c in received[0]], ['Shared', 'Other'])
+            buttons['规划航线'].invoke()
+            self.assertEqual(plan.call_count, 1)
+            win.route_variables['cargo'].set('2')
+            buttons['规划航线'].invoke()
+            self.wait_for(lambda: not win.route_state['busy'])
+            self.assertEqual(plan.call_count, 2)
+        entry = self.history_store.load()[0]
+        self.assertTrue(entry['parameters']['leg_overrides'][1]['enabled'])
+        self.assertNotIn('Modules', json.dumps(entry['parameters']))
+        self.assertEqual(entry['result']['segments'][1]['ship_name'], 'Other')
+
+    def test_unapplied_leg_editor_blocks_search_and_history_restores_missing_build_safely(self):
+        win = self.leg_window()
+        win.leg_table.selection_set('1')
+        editor = win.edit_leg()
+        buttons = {getattr(w, '_raw_text', ''): w for w in self.widgets(win)}
+        with patch.object(tool, 'plan') as plan, patch('route_gui.messagebox.showerror') as error:
+            buttons['规划航线'].invoke()
+            plan.assert_not_called()
+            error.assert_called_once()
+        editor.destroy()
+        self.configure_leg(win)
+        from route_history import build_key
+        entries = [dict(e) for e in win.leg_state['overrides']]
+        entries[1]['build_key'] = build_key(self.store.load()['Other'])
+        self.store.delete('Other')
+        win.restore_leg_overrides(entries, self.store.load())
+        self.assertTrue(win.leg_state['overrides'][1]['enabled'])
+        self.assertEqual(win.leg_state['overrides'][1]['selected'], '')
+        with patch.object(tool, 'plan') as plan, patch('route_gui.messagebox.showerror') as error:
+            buttons['规划航线'].invoke()
+            plan.assert_not_called()
+            error.assert_called_once()
+        win.restore_leg_overrides([])
+        self.assertFalse(any(e['enabled'] for e in win.leg_state['overrides']))
+
+    def test_invalid_later_leg_is_rejected_before_any_route_request(self):
+        win = self.leg_window()
+        self.configure_leg(win, reserve='16')
+        buttons = {getattr(w, '_raw_text', ''): w for w in self.widgets(win)}
+        original = tool.plan
+        calls = []
+        def offline(raw, points, options, stop, progress, **kwargs):
+            return original(raw, points, options, stop, progress,
+                            http=lambda *args: calls.append(args), fsds=FSDS, **kwargs)
+        with patch.object(tool, 'plan', side_effect=offline), patch('route_gui.messagebox.askyesno', return_value=True):
+            buttons['规划航线'].invoke()
+            self.wait_for(lambda: not win.route_state['busy'])
+        self.assertFalse(win.route_state['info']['complete'])
+        self.assertEqual(win.route_state['info']['failed_segment'], 2)
+        self.assertEqual(calls, [])
+
+    def test_csv_import_is_offline_preserves_form_and_requires_follow_opt_in(self):
+        from test_route_csv import SPANSH
+        win = self.follow_window(['Old', 'Result'])
+        path = Path(self.directory.name) / 'external.csv'
+        path.write_text(SPANSH, encoding='utf-8-sig')
+        source_before = win.route_variables['source'].get()
+        win.follow_variables['enabled'].set(True)
+        win.follow_variables['auto_copy'].set(True)
+        button = next(w for w in self.widgets(win) if getattr(w, '_raw_text', '') == '导入路线 CSV')
+        with patch('route_gui.filedialog.askopenfilename', return_value=str(path)), \
+                patch.object(tool, 'http_json') as http, patch.object(tool, 'plan') as plan, \
+                patch.object(win, 'clipboard_clear') as clipboard:
+            button.invoke()
+            self.wait_for(lambda: not win.route_state['busy'])
+            self.assertEqual([r['name'] for r in win.route_state['info']['rows']], ['A', 'B', 'A'])
+            self.assertTrue(win.route_state['info']['imported'])
+            self.assertIsNone(win.route_state['result_key'])
+            self.assertEqual(win.route_variables['source'].get(), source_before)
+            self.assertFalse(win.follow_variables['enabled'].get())
+            self.assertFalse(win.follow_variables['auto_copy'].get())
+            self.assertEqual(win.result_tree.get_children(), ('0', '1', '2'))
+            self.app.set_language('en')
+            self.assertEqual(button.cget('text'), 'Import route CSV')
+            win.follow_variables['enabled'].set(True)
+            self.feed_position(win, 'B')
+            self.assertEqual(win.follow_position.next_system, 'A')
+            # Select the terminal occurrence explicitly (A occurs twice).
+            self.feed_position(win, 'A', '2026-10-23T12:01:00Z')
+            self.assertIn('End of CSV file', win.follow_text.get())
+            http.assert_not_called()
+            plan.assert_not_called()
+            clipboard.assert_not_called()
+
+    def test_csv_cancel_and_invalid_file_preserve_existing_result(self):
+        win = self.follow_window(['A', 'B'])
+        original = win.route_state['info']
+        button = next(w for w in self.widgets(win) if getattr(w, '_raw_text', '') == '导入路线 CSV')
+        with patch('route_gui.filedialog.askopenfilename', return_value=''):
+            button.invoke()
+        self.assertIs(win.route_state['info'], original)
+        path = Path(self.directory.name) / 'bad.csv'
+        path.write_text('Not,a,route', encoding='utf-8')
+        with patch('route_gui.filedialog.askopenfilename', return_value=str(path)), \
+                patch('route_gui.messagebox.showerror') as error:
+            button.invoke()
+            self.wait_for(lambda: not win.route_state['busy'])
+            error.assert_called_once()
+        self.assertIs(win.route_state['info'], original)
+        self.assertNotIn('disabled', button.state())
 
     def test_single_page_reaches_results_at_smaller_sizes(self):
         window = self.app.route_window()
@@ -195,8 +526,8 @@ class RouteGuiTests(unittest.TestCase):
         win.route_variables['source'].set('A')
         win.route_variables['destination'].set('B')
         original = tool.plan
-        def offline(raw, points, options, stop, progress):
-            return original(raw, points, options, stop, progress, http=Server(), fsds=FSDS)
+        def offline(raw, points, options, stop, progress, **kwargs):
+            return original(raw, points, options, stop, progress, http=Server(), fsds=FSDS, **kwargs)
         with patch.object(tool, 'plan', side_effect=offline):
             buttons['规划航线'].invoke()
             deadline = time.monotonic() + 4
@@ -299,7 +630,7 @@ class RouteGuiTests(unittest.TestCase):
         win.route_variables['source'].set('A')
         win.route_variables['destination'].set('B')
         button = next(w for w in self.widgets(win) if getattr(w, '_raw_text', '') == '规划航线')
-        with patch.object(tool, 'plan', side_effect=lambda *args: result()) as plan:
+        with patch.object(tool, 'plan', side_effect=lambda *args, **kwargs: result()) as plan:
             button.invoke()
             self.wait_for(lambda: not win.route_state['busy'])
             button.invoke()
@@ -349,7 +680,7 @@ class RouteGuiTests(unittest.TestCase):
         win = self.app.route_window()
         win.route_variables['destination'].set('B')
         button = next(w for w in self.widgets(win) if getattr(w, '_raw_text', '') == '规划航线')
-        with patch.object(tool, 'plan', side_effect=lambda *args: result(False)) as plan:
+        with patch.object(tool, 'plan', side_effect=lambda *args, **kwargs: result(False)) as plan:
             button.invoke()
             win.route_variables['destination'].set('edited while busy')
             self.wait_for(lambda: not win.route_state['busy'])
@@ -366,7 +697,7 @@ class RouteGuiTests(unittest.TestCase):
         win = self.app.route_window()
         win.route_variables['destination'].set('B')
         button = next(w for w in self.widgets(win) if getattr(w, '_raw_text', '') == '规划航线')
-        with patch.object(tool, 'plan', side_effect=lambda *args: result()) as plan:
+        with patch.object(tool, 'plan', side_effect=lambda *args, **kwargs: result()) as plan:
             button.invoke()
             self.wait_for(lambda: not win.route_state['busy'])
             # A displayed interrupted attempt must remain eligible for an actual

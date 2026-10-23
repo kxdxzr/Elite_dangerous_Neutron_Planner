@@ -55,6 +55,7 @@ class App:
         if isinstance(points, list) and all(isinstance(name, str) for name in points):
             self.window.route_state['points'] = points[:100]
             self.window.render_points()
+        self.window.restore_leg_overrides(self.settings.get('leg_overrides', []))
         if as_root:
             self.set_language(self.localizer.language)
         return self.window
@@ -79,6 +80,7 @@ class App:
         if self.window is not None and self.window.winfo_exists():
             settings['route'] = {key: variable.get() for key, variable in self.window.route_variables.items()}
             settings['waypoints'] = list(self.window.route_state['points'])
+            settings['leg_overrides'] = [dict(entry) for entry in self.window.leg_state['overrides']]
         session_store.save(data_file('settings.json'), settings)
         self.root.destroy()
 

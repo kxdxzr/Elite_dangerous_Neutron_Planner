@@ -17,9 +17,12 @@ def build_key(raw):
     return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
 
 
-def request_key(raw, points, options):
+def request_key(raw, points, options, leg_configs=None):
     # Bump the model number if parsing/physical assumptions change.
     data = [1, route_ship.DATA_REVISION, build_key(raw), [p.strip().casefold() for p in points], asdict(options)]
+    if leg_configs is not None:
+        data.append([[build_key(config['raw']), float(config['cargo']), float(config['reserve'])]
+                     for config in leg_configs])
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode('utf-8')).hexdigest()
 
 
@@ -55,6 +58,7 @@ def validate_entry(entry):
             or parameters['algorithm'] not in ('优先少跳', '优先计算速度')
             or parameters['injection'] not in ('不使用', '仅在需要时', '始终使用')):
         raise ValueError('Invalid route history parameters.')
+    validate_leg_overrides(parameters.get('leg_overrides', []))
     points = entry.get('points')
     if not isinstance(points, list) or any(not isinstance(p, str) or not p.strip() for p in points):
         raise ValueError('Invalid route history waypoints.')
@@ -70,6 +74,17 @@ def validate_entry(entry):
         if (not isinstance(row, dict) or not isinstance(row.get('name'), str)
                 or type(row.get('full_tank_start')) is not bool):
             raise ValueError('Invalid route history row.')
+
+
+def validate_leg_overrides(overrides):
+    if not isinstance(overrides, list) or len(overrides) > 101:
+        raise ValueError('Invalid leg overrides.')
+    for entry in overrides:
+        if (not isinstance(entry, dict) or type(entry.get('enabled')) is not bool or
+                any(not isinstance(entry.get(key), str) for key in ('source', 'destination', 'selected', 'cargo', 'reserve')) or
+                not isinstance(entry.get('build_key', ''), str)):
+            raise ValueError('Invalid leg override.')
+    return overrides
 
 
 class RouteHistory:

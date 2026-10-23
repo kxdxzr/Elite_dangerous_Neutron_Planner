@@ -6,13 +6,18 @@
 
 - 本地：`E:/opencode/bridge/Elite_dangerous_Neutron_Planner`
 - GitHub：https://github.com/kxdxzr/Elite_dangerous_Neutron_Planner
-- 分支：`main`，远端 `origin`；使用 `git status` / `git log -3` 查看实时状态。
+- 当前开发分支：`dev`，远端 `origin`；`main` 保留 v0.1.0 发布代码。使用 `git status` / `git log -3` 查看实时状态。
 - 拆分基线提交：`1d3413462f0d31554e0ce35772a90fd44485311a`。
 - 独立版本：`0.1.0`，位于 `src/export_metadata.py`。
 - 用户已明确授权发布 `v0.1.0` Release；发布包包含 Windows EXE、源码及 SHA-256 校验文件。
 - CI 基线：https://github.com/kxdxzr/Elite_dangerous_Neutron_Planner/actions/runs/39213832840
 - Windows 构建附件：该运行的 `EliteDangerousNeutronPlanner-Windows` artifact。
 - 本地 EXE：`dist/EliteDangerousNeutronPlanner.exe`，不纳入 Git。
+
+用户授权将当前开发代码提交并推送到 `dev`：包括当前／历史 Journal 配船导入、
+俯视路线图、分段配船覆盖、原生／Spansh CSV 导入与可回读导出。最近验证为
+132 项测试及源码离线冒烟通过；此次仅推送开发分支，不更新 main、不重新打包、
+不创建新 Release 或替换 v0.1.0 资产。下方“未提交／未推送”为开发过程历史记录。
 
 v0.1.0 发布验证：95 项隔离测试通过；源码与重新构建 EXE 的离线冒烟通过，
 EXE 报告版本 `0.1.0`、`frozen=true`、DPI awareness=1。发布不包含悬浮窗，
@@ -38,6 +43,79 @@ Windows CI artifact，不创建 Release／版本标签。下方“未提交／�
 `docs/upstream-route-planner.md` 中的在线验证属于上游历史，不能冒充独立版的新实测。
 
 ## 2. 用户确定的产品边界
+
+v0.1.0 发布后本地新增（未重新发布）：用户要求不依赖 EDMC 内置读取游戏配船。
+`src/journal_ship.py` 仅显式点击时读取最新活动 Journal 会话的完整 Loadout，
+复用有界倒序读取、仅回查同会话分卷；最新变更事件之后没有新快照时拒绝旧配置，
+不跨会话／账号回退。转换为现有 SLEF 形输入，保留质量、油箱、模块和工程数值，
+不保存指挥官 ID／财务／无关事件。缺参数拒绝，不从 MaxJumpRange 反推。
+主界面“读取当前配船”后台只读，主线程打开带时间的编辑器；用户明确保存
+才收藏，同名覆盖仍须确认。读取不联网，保存选择后的原有预览可下载 FSD 目录，
+不自动提交路线。目前仅当前舰船，不是全账号船库；用户要求如果未来读多艘，
+必须先列出并允许选择收藏，不得批量自动收藏。未读取私人 Journal 做测试。
+本轮 103 项隔离测试全部通过，源码离线冒烟通过，compileall／diff 检查通过；
+仅用合成 Loadout 和模拟 GUI／网络验证，尚未重新构建、提交、推送或替换 Release。
+
+后续按用户要求新增“读取历史配船”：`read_ship_history` 显式后台扫描旧日志，
+64 MiB 总字节／500 舰船身份上限，超限会话整体跳过（不使用可能不完整的开头），
+退出通过 Event 取消。每个会话从 Commander／LoadGame 的 FID 确认身份，同会话
+分卷可继承，不跨会话猜测；按 (FID, ShipID) 去重、按 UTC 快照时间保留最新，
+最新无效快照抑制更旧配置。指挥官身份仅保留内存，配船收藏 JSON 不包含 FID。
+主线程打开选择器，指挥官下拉隔离记录，显示船型／船名／识别码／舰船编号／时间；
+单选后进入既有编辑器确认保存，不自动收藏。空列表／关闭不写收藏；未知 FSD
+仍需严格校验。明确提示历史非实时船库，含已售／已改装可能，不承诺日志覆盖全部船。
+历史读取本轮 109 项隔离测试通过，源码离线冒烟 `ok=true`、DPI awareness=1，
+compileall／diff 检查通过；仅合成日志与模拟网络验证，未读私人数据，未打包／上传。
+
+新增“俯视路线图”：`src/route_map.py` 用原生 Tk Canvas 在普通 Toplevel 内展示
+X/Z 俯视投影（+X 右、+Z 上），不是悬浮窗，无第三方渲染依赖／额外联网。
+仅用原始 rows 的 x/z 有限数字，缺失／无效坐标断线，不按距离推算、不补查坐标；
+历史无坐标则提示不可绘制，显示可绘制数量与投影非跳距警告。完整路线标起终点，
+未完成路线仅标已验证末尾；中子蓝点、补油橙圈、途经点菱形、当前位置绿圈。
+支持鼠标定点缩放、左键拖动、适应全图和指向查看名字；排序不改变原路线顺序。
+跟随变化只更新位置标记不自动居中，换路线重新适应；关闭销毁 timer／翻译回调。
+Spansh 当前前端 showRoute 使用 x/y/z 与 route_new.html（Ed3d），只做公开源码
+只读核对，未提交私人配船或做本次真实在线路线验证。原 route_tool 已保留原始
+返回坐标，历史存储同样保留，无需改变规划／缓存身份。
+本轮 115 项隔离测试通过；源码离线冒烟包含打开／关闭路线图，ok=true、DPI=1；
+compileall／diff 检查通过。未重新打包、提交、上传或替换 v0.1.0 Release。
+
+新增逐段配船覆盖：默认所有段沿用统一配船／cargo／reserve，结果前增加不可排序的
+分段配置表，选行进入单段编辑器明确应用；未应用／未关闭编辑器不能开始规划。
+仅覆盖配船、货物及储备燃油；注入／算法等仍统一，already_supercharged 仍仅第一段。
+起终点／途经点拓扑变化清空覆盖并提示重新核对，防止旧配置附着到新分段。
+`route_tool.plan(..., leg_configs=...)` 在任何星系解析／POST 前解析并校验全部段
+配船物理参数及 reserve<tank（可能先下载事实目录）；某后段无效时前段也不提交。
+所有参数开始时固定，随后按段串行调用；同船参数只解析一次。每段仍独立满油。
+结果 rows／segments 带配船名与 cargo／reserve，共享端点保留前段到达配船信息与
+下一段 departure_ship／departure_cargo／departure_reserve／departure_fuel，换配船
+增加不保证当地可换船警告；CSV 增列并保留公式转义，满油假设列仍在末尾。
+指纹含有效逐段配船摘要及 cargo／reserve，默认无覆盖保留旧指纹兼容；历史
+parameters.leg_overrides 只保存名称／摘要／端点／标量，不保存原始私人配船。
+恢复历史按摘要匹配各段配船，删除／修改需重新选；settings 保存分段覆盖并校验恢复。
+新增 9 项后端／GUI 测试。回归发现单段编辑器测试钩子形成 Tk 变量循环引用，
+关闭时在主线程清理钩子及 dialog 引用，避免后来后台 GC 触发 Tcl 错线程析构；
+GUI 测试也在主线程显式清理根窗口引用。未放宽测试断言。
+最终 124 项隔离测试全部通过，源码离线冒烟（含覆盖重启恢复）ok=true、DPI=1，
+compileall／diff 检查通过。未真实联网提交私人配船，尚未打包／提交／推送／发布。
+
+新增 CSV 路线导入：`src/route_csv.py` 离线读取 UTF-8（可带 BOM），限 32 MiB／
+100,000 系统行；支持本工具中英文含来源前导的旧／新导出及英文 Spansh Exact
+7 列和可选注入列。按文件行序保留重复星系，不重新提交路线，不恢复原始私人
+配船或规划表单，也不放入最近 5 次规划。缺失标记／配船／坐标为未知，不补网查。
+GUI 后台解析，成功才替换结果并清 result_key；取消／失败保留原结果。成功导入
+停止跟随并关闭自动复制，必须用户重新开启。未知完整性末行仅标 CSV 文件末尾，
+再次导出仍须确认；图例／结果警告区不把导入内容说成规划器已验证或默认满油。
+新导出增 X/Y/Z（存在时保留）及结尾 `# Neutron Planner route state v1` JSON 行，
+保留 complete／planned／failed／full-tank／status_known 及行数、表格摘要。
+导入校验摘要，防止截断／编辑后仍误用完整状态；摘要不是真实性／可行性证明。
+旧文件／Spansh 无此标记均完整性未知，不能从 remaining=0 推断完整；再导出
+仍保留未知。原始私人配船不嵌入 CSV。公式前缀及单引号导出转义／本工具导入
+还原为纯文本，不执行；Spansh 名称不套用本工具转义规则。
+按用户明确提供路径只读实测其 Spansh CSV：19 个星系、无坐标，解析成功；未修改
+源文件、未联网、未把原路线内容放入仓库测试／日志。测试仅保存合成 CSV。
+最终 132 项隔离测试全部通过；源码离线冒烟含 CSV 导入／再次导出回读，ok=true、
+DPI=1；compileall／diff 检查通过。尚未打包、提交、推送或替换 Release。
 
 拆分基线后新增（尚未重新构建本地 EXE）：目的地命名收藏，独立保存于
 `destination_favorites.json`；界面支持收藏当前终点、设为终点、重命名及确认删除，

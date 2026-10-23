@@ -11,11 +11,15 @@ This is not an official Frontier or Spansh product. The current version is **0.1
 ## What you can do
 
 - **Keep favourite builds:** import Coriolis JSON or EDSY SLEF and give each build a name.
+- **Read your in-game build without EDMC:** explicitly import the latest local Journal ship snapshot, review it and choose whether to save it as a favourite.
 - **Save destinations:** keep frequently visited systems and reuse them as your destination; rename or delete favourites.
 - **Plan through waypoints:** visit specified systems in order and rearrange stops.
+- **Change ships between legs:** inherit the shared build and fuel/cargo settings by default, with optional per-leg overrides configured before planning.
 - **Fill the source from game logs:** click **Use current system** to read the last recorded position from local Journals instead of copying a system name manually.
 - **Adjust planning options:** neutron boost is enabled by default; configure cargo, fuel reserve, injection, algorithm and other options.
 - **Use the results:** preview normal/neutron full-tank jump ranges, copy result system names or export a CSV.
+- **Import saved routes:** load this tool's English/Chinese CSV or Spansh Exact Plotter CSV offline for viewing and following.
+- **Preview the route from above:** an offline X/Z map with zoom, pan and route markers, without a browser or extra runtime dependencies.
 - **Revisit recent routes:** keep the last 5 planning attempts and their parameters locally across restarts. Blue rows highlight systems Spansh marks as containing a neutron star.
 - **Make it comfortable:** switch between English and Chinese, choose system/light/dark themes, and restore settings and favourites after restarting.
 - **Scroll one page:** settings, planning controls and results share a single page, without split panes. The mouse wheel scrolls the page; drag the table's right-hand scrollbar for long routes and its bottom scrollbar for additional columns.
@@ -37,6 +41,34 @@ The first ship-attribute calculation needs an internet connection to fetch modul
 3. Enter your source and destination systems. Add and reorder waypoints if needed.
 4. Set cargo, fuel reserve and other options to match your trip, then click **Plan route**.
 5. Review the results, copy system names or export a CSV as needed.
+
+### Configure different ships for individual legs
+
+Enter the source, destination and ordered waypoints first. **Per-leg builds (configure before planning)** lists every leg. By default, all legs inherit the selected shared build, cargo and fuel reserve; changing those shared settings updates every non-overridden leg.
+
+To change one leg, select its row, click **Configure selected leg**, enable **Override shared settings for this leg**, choose a saved build and set that leg's cargo/reserve. Click **Apply leg settings** before planning. Disable the override to return to shared settings. Injection, algorithm and the other routing switches remain shared; “first leg already supercharged” still applies only to the first leg.
+
+Apply or close the leg editor before clicking **Plan route**. All selected builds are snapshotted, and every leg's ship/physical parameters and fuel reserve are validated **before any system resolution or route submission** (the FSD catalogue may need downloading first). No mid-planning ship prompts occur. Unchanged complete results are not re-queried; fingerprints include all effective per-leg builds, cargo and reserves. Failed/stopped requests remain retryable.
+
+Changing the source, destination or waypoint order clears per-leg overrides with a warning, so old settings cannot silently attach to new legs. Review and configure them again before planning. Leg choices are remembered across restarts and saved with recent results; history stores build hashes, not private build JSON. Removed/changed historical builds require reselection, while the result remains viewable/exportable.
+
+**Every leg independently assumes its chosen ship's full main tank.** Fuel and supercharge do not carry across legs. The tool does not check whether a waypoint has your ship, permits ship changes or offers fuel. Results and CSV distinguish the arriving leg's build/cargo/reserve from the next leg's departure values at shared waypoints, with a warning when changing builds.
+
+### Read a ship build directly from the game Journal
+
+Switch to the desired ship in-game, then click **Read current ship build** beside the build favourites. The tool opens a build editor with the last complete `Loadout` snapshot and its record time. Check the build, choose a favourite name and click **Save ship build**; closing the editor discards the import. Existing favourites are never overwritten without confirmation.
+
+This is built in and does not require EDMC, an account login or another program. It reads only on click, using the same default/custom Journal folder as the source-position controls. Reading itself is offline; saving and selecting a build may fetch the usual FSD catalogue for the preview, but no route is submitted until you plan.
+
+**This imports the current ship recorded in the latest active game session, not every ship on your account.** Switch ships and repeat to collect more favourites. No older session is substituted if the latest has no complete build. After changing modules or engineering, leave Outfitting to generate a fresh snapshot; incomplete or stale snapshots are rejected rather than reconstructed. Logs may be stale after exiting the game; check the timestamp. Only ship/build fields are retained, not commander IDs, finances or unrelated events. Unknown drives still fail strict routing validation.
+
+### Choose other ships from historical Journals
+
+Click **Read historical ship builds** to scan local Journal files, then choose the **Commander** whose records you want to browse. The list shows ship type, name, ident, ship ID and record time. Select a row and click **Review selected build for saving** to open the editor; only clicking **Save ship build** adds it to favourites. Closing either window saves nothing. Existing-name overwrites still require confirmation.
+
+Records are grouped by commander identity and ship ID, not by ship name, and the newest snapshot is retained for each ship. Records without a confirmed commander/ship identity are skipped; invalid newest snapshots are not silently replaced by older builds. This is a history list, **not a live fleet inventory**: ships may have been changed or sold, and ships absent from the logs cannot appear. Check the timestamp and configuration before saving.
+
+Scanning is explicit, offline and bounded to 64 MiB of complete sessions and 500 ship identities. A limit warning means the list may be incomplete; counts of skipped invalid/unidentified records are shown. No commander identity is added to saved build JSON. The selected Journal folder is shared with the other Journal controls. Neither scanning nor choosing a historical build starts route planning.
 
 ### Save a frequently visited destination
 
@@ -81,6 +113,24 @@ When searching again after changing parameters, a **complete result from the las
 
 To reduce preparation time, confirmed system identities are cached for the current application session, and waypoints are resolved with limited concurrency. Route legs are still calculated sequentially.
 Progress distinguishes ship processing, system resolution, the Spansh queue and calculation, with stage timings shown afterward. **These optimizations cannot eliminate Spansh's own queueing or calculation time.**
+
+### Import route CSV files
+
+Click **Import route CSV** in the results actions. Supported files are this application's English/Chinese exports (including older exports with the provenance preamble), and English Spansh Exact Plotter exports such as `System Name,Distance,Distance Remaining,Fuel Left,Fuel Used,Refuel,Neutron Star`, with optional injection columns. UTF-8 files with or without a BOM are accepted, up to 32 MiB / 100,000 system rows.
+
+Importing replaces the displayed result only after the file has passed validation. It preserves file order and repeated system names, does not change your planning form or ship favourites, does not submit a route, and does not add an import to the five planning attempts. Cancelled/failed imports leave the previous result intact. Following and auto-copy are switched off after a successful import; re-enable them explicitly to follow the imported route. Viewing, copying, following and re-exporting work without re-planning.
+
+Missing builds, coordinates and flags remain unknown. CSV files do not restore private ship builds or all original planning settings. Spansh exports and older native exports have no reliable completeness marker, so their last row is labelled as the **end of the file**, not a verified destination; re-export requires confirmation. Imports are not independently validated for in-game feasibility, fuel assumptions or refuelling.
+
+New native exports include X/Y/Z when available and a final `# Neutron Planner route state v1` metadata row. This preserves complete/partial status and leg counts, with a checksum to detect mismatches between the state and data (not proof of authenticity or route feasibility). Keep that row when re-importing; other CSV tools should skip it. Without coordinates, the map cannot draw the route; importing makes no extra coordinate queries. Spreadsheet formula-like text is escaped on export and restored as text on native import, never executed.
+
+### Top-down route preview
+
+Click **Top-down route map** beside the result actions to open an ordinary preview window (not a floating overlay). It shows the original route order in the X/Z plane: +X right, +Z up, with height omitted. Use the wheel to zoom around the pointer, left-drag to pan, **Fit entire route** to reset, and point at stars for their names and coordinates.
+
+The map labels the start/destination, highlights neutron systems in blue, refuelling actions with orange rings, waypoints with diamonds, and the current confirmed route position with a green ring when following is enabled. Sorting the results does not change the route. Position updates do not automatically recenter the map.
+
+Only coordinates already present in the planning result are used, including saved results. Missing/invalid coordinates break the line rather than joining unrelated points; the number of systems with coordinates is shown. Older results without coordinates cannot be drawn. No additional network requests or route submissions occur. Incomplete routes show only the verified portion and label its end accordingly. Projected distances omit height and **are not in-game jump distances or proof of refuelling availability**.
 
 ## Before you depart
 

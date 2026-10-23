@@ -2,6 +2,69 @@
 import re
 
 CATALOG = {
+    '导入航线的完整性未确认，仍要导出文件中的记录？':
+        'The imported route is not confirmed complete. Export the file records anyway?',
+    '导入路线 CSV': 'Import route CSV', '正在导入 CSV（不联网）…': 'Importing CSV (offline)…',
+    'CSV 导入失败，原结果未更改。': 'CSV import failed; existing result unchanged.',
+    'CSV 已导入；仅使用文件记录，未重新验证航线。':
+        'CSV imported; using file records only, without revalidating the route.',
+    'CSV 已导入；完整状态未知，末行仅代表文件末尾。':
+        'CSV imported; completeness unknown. The last row is only the end of the file.',
+    '导入路线仅依据 CSV 记录，不确认配船、满油、完整性或实际可行性。':
+        'Imported route uses CSV records only; build, full-tank assumptions, completeness and feasibility are not verified.',
+    '已到 CSV 文件末尾（不代表完整航线终点）':
+        'End of CSV file reached (not necessarily the complete route destination)',
+    '导入路线：未重新验证，以文件记录为准': 'Imported route: not revalidated; based on file records',
+    'CSV 文件末尾': 'End of CSV file',
+    '正在校验所有分段配船…': 'Validating all leg builds…',
+    '此处更换配船；不保证当地可换船，请自行确认':
+        'Ship change here; local ship availability is not guaranteed. Verify it yourself.',
+    '分段配船（开始规划前配置）': 'Per-leg builds (configure before planning)',
+    '默认各段沿用统一配船、货物和储备燃油；选中分段可单独配置。所有段校验完成后才开始查询。':
+        'Legs inherit the shared build, cargo and fuel reserve by default. Select a leg to override; all legs are validated before searching.',
+    '每段独立满油；不验证途经点是否能换船或补油，请自行确认。':
+        'Each leg starts with a full tank. Ship availability and refuelling at waypoints are not checked; verify them yourself.',
+    '本段配船': 'Leg build', '出发配船': 'Departure build',
+    '本段货物 t': 'Leg cargo t', '本段储备燃油 t': 'Leg fuel reserve t',
+    '出发货物 t': 'Departure cargo t', '出发储备燃油 t': 'Departure fuel reserve t',
+    '单独配置分段': 'Configure individual leg', '配置所选分段': 'Configure selected leg',
+    '此段单独配置': 'Override shared settings for this leg', '应用分段配置': 'Apply leg settings',
+    '沿用统一设置': 'Inherit shared settings',
+    '航点已变化，各段恢复统一设置，请重新核对分段配置。':
+        'Route points changed. Legs now inherit shared settings; review per-leg settings again.',
+    '航点已变化，请关闭并重新配置该分段。': 'Route points changed. Close and configure this leg again.',
+    '分段配置无法恢复，请重新核对。': 'Could not restore leg settings; review them again.',
+    '请先应用分段配置或关闭配置窗口，再开始规划。':
+        'Apply the leg settings or close their editor before planning.',
+    '分段配船已删除或修改，请重新配置。': 'A leg build was removed or changed; configure the leg again.',
+    '俯视路线图': 'Top-down route map', '适应整条路线': 'Fit entire route',
+    '俯视 X/Z（ly）；滚轮缩放，左键拖动，指向星点查看名称。':
+        'Top-down X/Z (ly). Wheel to zoom, left-drag to pan, point at a star for its name.',
+    '蓝：中子星；橙圈：补油；绿圈：当前位置；菱形：途经点。':
+        'Blue: neutron; orange ring: refuel; green ring: current position; diamond: waypoint.',
+    '完整路线': 'Complete route', '未完成路线：仅显示已验证部分': 'Incomplete route: verified portion only',
+    '可绘制星系': 'Systems with coordinates', '已验证末尾': 'Verified end',
+    '缺失坐标处断开；俯视投影不显示高度，图上距离不等于跳跃距离。':
+        'Missing coordinates break lines. Height is omitted; projected distances are not jump distances.',
+    '暂无可用坐标；不会推算位置或额外联网。':
+        'No coordinates available. Positions are not inferred and no extra network requests are made.',
+    '读取历史配船': 'Read historical ship builds', '选择历史配船': 'Choose historical ship build',
+    '指挥官': 'Commander', '舰船识别码': 'Ship ident',
+    '查看所选配船并收藏': 'Review selected build for saving',
+    '扫描结果': 'Scan results',
+    '跳过无效或无法确认身份的记录': 'Invalid or unidentified records skipped',
+    '已达扫描上限，列表可能不完整。': 'Scan limit reached; the list may be incomplete.',
+    '历史配船可能过时或已出售，不代表当前船库；选择一艘后核对并保存，不会自动收藏。':
+        'Historical builds may be outdated or sold, not your current fleet. Select a ship, review and save; nothing is saved automatically.',
+    '读取当前配船': 'Read current ship build',
+    '本地日志配船，请核对后保存；未自动覆盖收藏。':
+        'Local Journal build: check before saving. No favourite has been overwritten.',
+    '仅点击时读取最新日志会话的配船，不依赖 EDMC；请先在游戏中切换到目标舰船。日志目录可在起点区域选择。':
+        'Reads the latest Journal session only on click, without EDMC. Switch to the desired ship in-game first. Choose the Journal folder near the source controls.',
+    '配船已变更但尚无完整记录，请在游戏中退出配装界面或重新进入游戏后重试。':
+        'The build changed without a fresh full snapshot. Leave Outfitting or re-enter the game, then retry.',
+    '最新游戏会话中未找到完整配船，请切换到目标舰船或重新进入游戏后重试。':
+        'No full build found in the latest game session. Switch to the desired ship or re-enter the game, then retry.',
     '跟随游戏位置': 'Follow game position', '自动复制计划下一跳': 'Auto-copy planned next system',
     '定位当前行': 'Locate current row', '确认所选位置': 'Confirm selected position',
     '当前星系': 'Current system', '路线位置': 'Route position', '计划下一跳': 'Planned next system',
