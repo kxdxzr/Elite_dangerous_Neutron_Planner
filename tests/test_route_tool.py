@@ -215,7 +215,7 @@ class RouteTests(unittest.TestCase):
     def test_cancellation_between_legs_identifies_next_leg(self):
         stop, server = threading.Event(), Server()
         def progress(text, detail):
-            if detail['done'] == 1:
+            if detail['stage'] == '航线分段' and detail['done'] == 1:
                 stop.set()
         info = tool.plan(json.dumps(build()), ['A', 'B', 'C'], tool.Options(), stop=stop,
                          http=server, fsds=FSDS, progress=progress)

@@ -6,10 +6,13 @@ import gzip
 import json
 import os
 import re
+import threading
 import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from collections import OrderedDict
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait as wait_futures
 
 import route_ship
 import session_store
@@ -18,6 +21,36 @@ from result_format import format_ly, format_number
 
 BASE = 'https://spansh.co.uk/api'
 FULL_TANK_NOTE = '本段起点按满油计算；途经点不保证能补油'
+
+
+class SystemCache:
+    """Bounded, thread-safe, success-only name/ID cache for this process."""
+    def __init__(self, capacity=512, ttl=86400, clock=time.monotonic):
+        self.capacity, self.ttl, self.clock = capacity, ttl, clock
+        self.entries, self.lock = OrderedDict(), threading.Lock()
+
+    def get(self, name):
+        key = name.strip().casefold()
+        with self.lock:
+            entry = self.entries.get(key)
+            if entry is None:
+                return None
+            if self.clock() - entry[0] >= self.ttl:
+                del self.entries[key]
+                return None
+            self.entries.move_to_end(key)
+            return dict(entry[1])
+
+    def put(self, name, system):
+        with self.lock:
+            key = name.strip().casefold()
+            self.entries[key] = (self.clock(), dict(system))
+            self.entries.move_to_end(key)
+            while len(self.entries) > self.capacity:
+                self.entries.popitem(last=False)
+
+
+SYSTEM_CACHE = SystemCache()
 
 
 def http_json(url, payload=None):
@@ -118,14 +151,65 @@ def check_stop(stop):
         raise InterruptedError('Route planning cancelled.')
 
 
-def resolve(name, http=http_json):
+def resolve(name, http=http_json, cache=None):
+    name = name.strip()
+    # Injected transports get no global cache, keeping tests/services isolated.
+    cache = SYSTEM_CACHE if cache is None and http is http_json else cache
+    if cache is not None:
+        cached = cache.get(name)
+        if cached is not None:
+            return cached
     data = http(BASE + '/systems/field_values/system_names?q=' + urllib.parse.quote(name, safe=''))
     for row in data.get('min_max', []):
         if isinstance(row, dict) and str(row.get('name', '')).casefold() == name.casefold():
             ident = str(row.get('id64', ''))
             if ident.isdigit():
-                return dict(name=row['name'], id64=ident)
+                system = dict(name=row['name'], id64=ident)
+                if cache is not None:
+                    cache.put(name, system)
+                return system
     raise ValueError(f'No exact recorded system match: {name}')
+
+
+def resolve_points(points, http=http_json, stop=None, progress=None, cache=None, workers=2):
+    """Resolve unique endpoints with at most two concurrent read-only requests."""
+    check_stop(stop)
+    workers = max(1, min(2, workers))
+    unique = dict((name.casefold(), name) for name in points)
+    remaining = iter(unique.items())
+    resolved, pending = {}, {}
+    pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix='route-systems')
+
+    def worker(name):
+        check_stop(stop)
+        return resolve(name, http, cache)
+
+    def submit_next():
+        check_stop(stop)
+        item = next(remaining, None)
+        if item is not None:
+            key, name = item
+            pending[pool.submit(worker, name)] = key
+
+    try:
+        for _ in range(min(workers, len(unique))):
+            submit_next()
+        while pending:
+            check_stop(stop)
+            completed, _ = wait_futures(pending, timeout=.1, return_when=FIRST_COMPLETED)
+            for future in completed:
+                check_stop(stop)
+                key = pending.pop(future)
+                resolved[key] = future.result()
+                if progress:
+                    progress(len(resolved), len(unique))
+            # Do not enqueue any more GETs after an error/cancellation.
+            for _ in range(len(completed)):
+                submit_next()
+        check_stop(stop)
+        return [resolved[name.casefold()] for name in points]
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def payload(ship, raw, source, destination, options, leg):
@@ -163,6 +247,11 @@ def plot_job(request, stop=None, progress=None, http=http_json, timeout=600, wai
             raise ValueError('Unknown route job state: ' + str(state))
         if progress:
             progress(str(state))
+        # Keep queue backoff polite, but do not retain a 10-second queue delay
+        # after the server starts calculating a route that may finish quickly.
+        calculating = state in ('started', 'running')
+        if calculating:
+            delay = min(delay, 4)
         if wait:
             wait(delay)
         elif stop is not None:
@@ -170,7 +259,7 @@ def plot_job(request, stop=None, progress=None, http=http_json, timeout=600, wai
                 check_stop(stop)
         else:
             time.sleep(delay)
-        delay = min(10, delay * 1.5)
+        delay = min(4 if calculating else 10, delay * 1.5)
     raise TimeoutError('Spansh route job timed out; no automatic resubmission was made.')
 
 
@@ -193,7 +282,7 @@ def validate_jumps(jumps, source, destination):
                 route_ship.numeric(row[key], key)
 
 
-def plan(raw, points, options, stop=None, progress=None, http=http_json, fsds=None, wait=None):
+def plan(raw, points, options, stop=None, progress=None, http=http_json, fsds=None, wait=None, resolver_cache=None):
     options = copy.deepcopy(options).validate()
     if len(points) < 2 or any(not isinstance(p, str) or not p.strip() for p in points):
         raise ValueError('Enter a start, destination and non-empty waypoints.')
@@ -201,26 +290,33 @@ def plan(raw, points, options, stop=None, progress=None, http=http_json, fsds=No
     if any(a.casefold() == b.casefold() for a, b in zip(points, points[1:])):
         raise ValueError('Adjacent route points must be different.')
     info = dict(complete=False, rows=[], segments=[], planned_segments=len(points) - 1,
-                failed_segment=None, reason='', full_tank_each_segment=True)
-    def emit(text, done=0):
+                 failed_segment=None, reason='', full_tank_each_segment=True)
+    started = phase_started = time.monotonic()
+    phase = 'ship_seconds'
+    timings = info['timings'] = dict(ship_seconds=0, resolve_seconds=0, route_seconds=0)
+    def emit(text, done=0, total=None, stage='航线分段'):
         if progress:
-            progress(text, dict(done=done, work_total=len(points) - 1, stage='航线分段'))
+            progress(text, dict(done=done, work_total=len(points) - 1 if total is None else total, stage=stage))
     try:
         check_stop(stop)
-        emit('准备舰船参数与航点')
+        emit('准备舰船参数与航点', total=1, stage='配船处理')
         ship = route_ship.parse_ship(raw, fsds if fsds is not None else route_ship.catalog(http))
-        resolved, memo = [], {}
-        for name in points:
-            check_stop(stop)
-            if name.casefold() not in memo:
-                memo[name.casefold()] = resolve(name, http)
-            resolved.append(memo[name.casefold()])
+        timings[phase] = time.monotonic() - phase_started
+        phase, phase_started = 'resolve_seconds', time.monotonic()
+        emit('正在解析航点…', total=len(set(p.casefold() for p in points)), stage='星系解析')
+        resolved = resolve_points(points, http, stop,
+            lambda done, total: emit('正在解析航点…', done, total, '星系解析'), resolver_cache)
+        timings[phase] = time.monotonic() - phase_started
+        phase, phase_started = 'route_seconds', time.monotonic()
         for leg, (source, destination) in enumerate(zip(resolved, resolved[1:]), 1):
             info['failed_segment'] = leg
             check_stop(stop)
             emit(f"{source['name']} → {destination['name']}", leg - 1)
             request = payload(ship, raw, source, destination, options, leg)
-            job, jumps = plot_leg(request, stop, lambda state: emit(f"{source['name']} → {destination['name']}: {state}", leg - 1), http, wait=wait)
+            def poll_progress(state):
+                stage = 'Spansh 排队' if state in ('queued', 'unstarted') else 'Spansh 计算'
+                emit(f"{source['name']} → {destination['name']}", leg - 1, stage=stage)
+            job, jumps = plot_leg(request, stop, poll_progress, http, wait=wait)
             validate_jumps(jumps, source, destination)
             check_stop(stop)
             rows = [dict(copy.deepcopy(row), segment=leg, job=job, waypoint=False,
@@ -245,6 +341,9 @@ def plan(raw, points, options, stop=None, progress=None, http=http_json, fsds=No
         info['reason'] = str(exc)
     except Exception as exc:
         info['reason'] = str(exc)
+    finally:
+        timings[phase] = time.monotonic() - phase_started
+        timings['total_seconds'] = time.monotonic() - started
     return info
 
 

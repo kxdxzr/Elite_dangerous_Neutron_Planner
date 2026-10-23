@@ -16,7 +16,8 @@ def run(report_path):
     previous = os.environ.get('ELITE_NEUTRON_DATA_DIR')
     root = None
     try:
-        with tempfile.TemporaryDirectory() as directory, patch.object(route_tool.Favorites, 'load', return_value={}):
+        with tempfile.TemporaryDirectory() as directory, patch.object(route_tool.Favorites, 'load', return_value={}), \
+                patch('journal_location.JournalFollower') as follower:
             os.environ['ELITE_NEUTRON_DATA_DIR'] = directory
             root = tk.Tk()
             root.withdraw()
@@ -25,9 +26,11 @@ def run(report_path):
             app = App(root)
             win = app.route_window(as_root=True)
             assert win is root
+            assert not any(variable.get() for variable in win.follow_variables.values())
             win.route_variables['destination'].set('Alpha Centauri')
             win.route_variables['cargo'].set('17')
             win.route_state['points'] = ['Lave']
+            app.journal_directory = str(Path(directory) / 'chosen-journals')
             win.render_points()
             assert not win.waypoint_tree._sortable
             for mode in ('dark', 'light', 'system', 'dark'):
@@ -35,6 +38,10 @@ def run(report_path):
             app.set_language('en')
             assert 'Neutron' in root.title()
             assert not errors, errors
+            # Consent is not persisted: enabling these variables without invoking
+            # commands must not start a reader or enable them on next launch.
+            win.follow_variables['enabled'].set(True)
+            win.follow_variables['auto_copy'].set(True)
             app.close()
             root = tk.Tk()
             root.withdraw()
@@ -45,6 +52,9 @@ def run(report_path):
             assert win.route_variables['cargo'].get() == '17'
             assert win.route_variables['destination'].get() == 'Alpha Centauri'
             assert win.route_state['points'] == ['Lave']
+            assert app.journal_directory == str(Path(directory) / 'chosen-journals')
+            assert not any(variable.get() for variable in win.follow_variables.values())
+            follower.assert_not_called()
             report['dpi_awareness'] = process_dpi_awareness()
             if sys.platform == 'win32':
                 assert report['dpi_awareness'] in (1, 2)

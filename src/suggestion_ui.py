@@ -71,8 +71,12 @@ class SuggestPopup:
         self.win.wm_geometry(f"+{x}+{y}")
         self.win.lift()
         self.lb = tk.Listbox(self.win, height=len(items),
-                             width=max(16, min(44, max(len(s) for s in items) + 2)))
-        self.lb.pack()
+                             width=max(40, min(80, max(len(s) for s in items) + 2)))
+        self.lb.pack(fill='both', expand=True)
+        self.win.update_idletasks()
+        width = min(widget.winfo_screenwidth() - 20, max(widget.winfo_width(), self.win.winfo_reqwidth()))
+        x = max(0, min(x, widget.winfo_screenwidth() - width))
+        self.win.wm_geometry(f'{width}x{self.win.winfo_reqheight()}+{x}+{y}')
         for it in items:
             self.lb.insert("end", it)
         self.lb.selection_set(0)
@@ -266,4 +270,5 @@ def attach_system_suggest(cb, textvar, suggest=None, feedback=None):
             pop.hide(cb)
     cb.bind("<Destroy>", destroyed, add="+")
     cb.configure(postcommand=schedule)
+    state['set_value'] = pick
     return state

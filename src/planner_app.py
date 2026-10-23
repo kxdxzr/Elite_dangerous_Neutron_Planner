@@ -14,6 +14,8 @@ class App:
     def __init__(self, root):
         self.root, self.window = root, None
         self.settings = session_store.load(data_file('settings.json'))
+        saved_journal = self.settings.get('journal_directory', '')
+        self.journal_directory = saved_journal if isinstance(saved_journal, str) else ''
         self.localizer = Localizer(root, self.settings.get('language', 'zh'))
         self.appearance_manager = Appearance(root, self.settings.get('appearance', 'system'))
         header = ttk.Frame(root, padding=8)
@@ -23,7 +25,7 @@ class App:
             'en' if self.localizer.language == 'zh' else 'zh')).pack(side='right', padx=4)
         self.appearance_choice = tk.StringVar(root, value=MODES[self.appearance_manager.mode])
         box = ttk.Combobox(header, textvariable=self.appearance_choice,
-                           values=list(MODES.values()), state='readonly', width=12)
+                           values=list(MODES.values()), state='readonly', width=20)
         box.pack(side='right', padx=4)
         box.bind('<<ComboboxSelected>>', lambda event: self.set_appearance(
             next(key for key, value in MODES.items() if value == self.appearance_choice.get())))
@@ -73,6 +75,7 @@ class App:
 
     def close(self):
         settings = dict(language=self.localizer.language, appearance=self.appearance_manager.mode)
+        settings['journal_directory'] = self.journal_directory
         if self.window is not None and self.window.winfo_exists():
             settings['route'] = {key: variable.get() for key, variable in self.window.route_variables.items()}
             settings['waypoints'] = list(self.window.route_state['points'])

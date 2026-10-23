@@ -10,11 +10,13 @@ PALETTES = {
     'light': dict(bg='#f3f5f9', surface='#ffffff', alternate='#edf2f8',
                   text='#202b3c', muted='#58677c', border='#cbd5e1',
                   accent='#205ecf', hover='#174dac', selected='#ffffff',
-                  disabled='#65748a', warning='#895000'),
+                  disabled='#65748a', warning='#895000', neutron_bg='#dceeff', neutron_text='#123d70',
+                  current_bg='#d5f3df', current_text='#124329'),
     'dark': dict(bg='#171e29', surface='#202a38', alternate='#263344',
                  text='#e7edf7', muted='#a8b7cd', border='#43536a',
                  accent='#3574dc', hover='#4484ec', selected='#ffffff',
-                 disabled='#96a6bd', warning='#f2bf65'),
+                 disabled='#96a6bd', warning='#f2bf65', neutron_bg='#173f5b', neutron_text='#c4eaff',
+                 current_bg='#174731', current_text='#cff7dd'),
 }
 
 
@@ -117,7 +119,7 @@ class Appearance:
                                             ('pressed', p['hover']), ('active', p['hover'])],
               foreground=[('disabled', p['disabled']), ('!disabled', p['selected'])])
         for name in ('TEntry', 'TCombobox', 'TSpinbox'):
-            s.configure(name, padding=5, foreground=p['text'], fieldbackground=p['surface'],
+            s.configure(name, padding=7, arrowsize=20, foreground=p['text'], fieldbackground=p['surface'],
                         background=p['surface'], insertcolor=p['text'],
                         arrowcolor=p['text'], borderwidth=1)
             s.map(name, fieldbackground=[('disabled', p['alternate']),
@@ -217,6 +219,10 @@ class Appearance:
             if cls in ('Tk', 'Toplevel'):
                 self._titlebar(path)
             if cls == 'Treeview':
+                self.root.tk.call(path, 'tag', 'configure', 'route_current',
+                                  '-background', self.palette['current_bg'], '-foreground', self.palette['current_text'])
+                self.root.tk.call(path, 'tag', 'configure', 'neutron',
+                                  '-background', self.palette['neutron_bg'], '-foreground', self.palette['neutron_text'])
                 for tag, color in (('_stripe_even', self.palette['surface']),
                                    ('_stripe_odd', self.palette['alternate'])):
                     self.root.tk.call(path, 'tag', 'configure', tag, '-background', color)

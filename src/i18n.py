@@ -2,6 +2,49 @@
 import re
 
 CATALOG = {
+    '跟随游戏位置': 'Follow game position', '自动复制计划下一跳': 'Auto-copy planned next system',
+    '定位当前行': 'Locate current row', '确认所选位置': 'Confirm selected position',
+    '当前星系': 'Current system', '路线位置': 'Route position', '计划下一跳': 'Planned next system',
+    '日志时间': 'Journal time', '已复制下一跳': 'Next system copied', '已到达终点': 'Destination reached',
+    '已到已验证路线末尾（路线未完成）': 'End of verified route (route incomplete)',
+    '当前位置在路线中多次出现，请选中对应行并点击“确认所选位置”。':
+        'This system occurs multiple times. Select the matching row and click Confirm selected position.',
+    '剪贴板暂不可用，可重新切换自动复制开关重试。':
+        'Clipboard unavailable. Toggle auto-copy off and on to retry.',
+    '读取日志位置失败，等待重试。': 'Could not read the Journal position; waiting to retry.',
+    '绿色行表示当前位置；自动复制会替换剪贴板内容，不在路线中时不操作。':
+        'Green marks your position. Auto-copy replaces clipboard contents; nothing is copied outside the route.',
+    '点击读取本地日志作为起点；持续跟随需在结果区单独开启。':
+        'Click to fill the source from local Journals. Enable continuous following separately in the results area.',
+    '正在解析航点…': 'Resolving route points…', '星系解析': 'System resolution',
+    'Spansh 排队': 'Spansh queue', 'Spansh 计算': 'Spansh calculation',
+    '配船处理': 'Ship processing', '路线请求与等待': 'Route requests and waiting',
+    '总耗时': 'Total time', '该次查询耗时': 'Time for that query',
+    '历史结果，未重新查询': 'Saved result, not queried again',
+    '使用当前星系': 'Use current system', '选择游戏日志文件夹': 'Choose Journal folder',
+    '仅点击时读取本地日志；位置以最近记录为准，不自动追踪。':
+        'Reads local Journals only on click. Uses the last recorded position, not live tracking.',
+    '正在读取本地游戏日志…': 'Reading local game Journal…',
+    '读取日志失败；起点未更改。': 'Could not read Journal; source unchanged.',
+    '起点已手动更改，未覆盖；如需日志位置请再次点击。':
+        'Source was edited and has not been overwritten. Click again to use the Journal position.',
+    '日志位置（非实时）': 'Journal position (not live)',
+    '日志行过长，无法安全读取当前位置。': 'Journal line is too large to safely read the position.',
+    '未找到游戏日志文件夹，请选择 Journal 所在文件夹。': 'Game Journal folder not found. Choose the folder containing Journal files.',
+    '文件夹中没有 Journal 日志，请先进入游戏或选择其他文件夹。':
+        'No Journal files in this folder. Enter the game first or choose another folder.',
+    '日志文件过多，请选择只含近期 Journal 的文件夹。': 'Too many Journal files. Choose a folder with only recent Journals.',
+    '日志中的位置信息无效，请等待游戏写入新的位置记录。':
+        'Invalid Journal position. Wait for the game to write a new position record.',
+    '近期日志过大且未找到位置，请在游戏中更新位置后重试。':
+        'Recent Journal data is too large and no position was found. Update your position in-game and retry.',
+    '最新游戏会话尚无位置记录，请进入游戏后重试。': 'The latest game session has no position record yet. Enter the game and retry.',
+    '最近5次规划': 'Last 5 routes', '查看历史结果': 'View saved result',
+    '完整': 'Complete',
+    '蓝色行：Spansh 标记含中子星的星系；实际增压条件请在游戏中确认。':
+        'Blue rows: systems marked as containing a neutron star by Spansh. Check boosting conditions in-game.',
+    '历史配船已删除或修改；结果仍可查看和导出，请重新选择配船后再规划。':
+        'The original build was deleted or changed. You can still view/export the result; select a build before planning again.',
     '目的地收藏': 'Destination favourites', '收藏当前终点': 'Save current destination',
     '设为终点': 'Use as destination', '重命名目的地': 'Rename destination', '删除目的地': 'Delete destination',
     '删除所选目的地收藏？': 'Delete the selected destination favourite?',
