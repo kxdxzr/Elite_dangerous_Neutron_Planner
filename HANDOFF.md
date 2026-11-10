@@ -8,7 +8,7 @@
 - GitHub：https://github.com/kxdxzr/Elite_dangerous_Neutron_Planner
 - 当前开发分支：`feature/info-overlay`（从 dev 的 d763c8d 创建）；`dev` 按用户要求保留为备份，`main` 保留 v0.1.0 发布代码。使用 `git status` / `git log -3` 查看实时状态。
 - 拆分基线提交：`1d3413462f0d31554e0ce35772a90fd44485311a`。
-- 独立版本：`0.1.0`，位于 `src/export_metadata.py`。
+- 独立版本：`0.2.0`，位于 `src/export_metadata.py`。
 - 用户已明确授权发布 `v0.1.0` Release；发布包包含 Windows EXE、源码及 SHA-256 校验文件。
 - CI 基线：https://github.com/kxdxzr/Elite_dangerous_Neutron_Planner/actions/runs/39213832840
 - Windows 构建附件：该运行的 `EliteDangerousNeutronPlanner-Windows` artifact。
