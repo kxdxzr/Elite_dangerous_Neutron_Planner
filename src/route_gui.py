@@ -36,6 +36,7 @@ def open_window(app, window=None):
     stop, events = threading.Event(), queue.Queue()
     state = {'busy': False, 'info': None, 'points': [], 'result_key': None, 'pending': None, 'cached_at': None}
     map_window = None
+    overlay_controller = None
     history_store = RouteHistory()
     history = []
     preview = {'generation': 0, 'identity': None, 'params': None, 'error': '', 'fsds': None}
@@ -728,7 +729,7 @@ def open_window(app, window=None):
     follow_enabled, auto_copy = tk.BooleanVar(win, value=False), tk.BooleanVar(win, value=False)
     position = RoutePosition()
     follow_state = dict(info=None, location=None, generation=0, stop=threading.Event(),
-                        marked=None, copied=None, error=None)
+                        marked=None, copied=None, error=None, fsd_health=None)
     follow_text = tk.StringVar(win)
     follow_controls = ttk.Frame(result_area, padding=8)
     follow_controls.pack(fill='x', before=table)
@@ -782,13 +783,15 @@ def open_window(app, window=None):
             follow_text.set(text)
         if map_window is not None:
             map_window.sync()
+        if overlay_controller is not None:
+            overlay_controller.refresh()
 
     def restart_follow():
         follow_state['stop'].set()
         follow_state['generation'] += 1
         generation = follow_state['generation']
         stopped = threading.Event()
-        follow_state.update(stop=stopped, location=None, error=None, copied=None)
+        follow_state.update(stop=stopped, location=None, error=None, copied=None, fsd_health=None)
         auto_control.configure(state='normal' if follow_enabled.get() else 'disabled')
         refresh_follow()
         if not follow_enabled.get():
@@ -800,9 +803,12 @@ def open_window(app, window=None):
             previous = object()
             while not stopped.is_set():
                 try:
-                    payload = (reader.poll(), None)
+                    location = reader.poll()
+                    from journal_health import FsdHealth
+                    health = getattr(reader, 'fsd_health', None)
+                    payload = (location, None, health if isinstance(health, FsdHealth) else None)
                 except (OSError, ValueError) as exc:
-                    payload = (None, str(exc))
+                    payload = (None, str(exc), None)
                 if stopped.is_set():
                     break
                 if payload != previous:
@@ -837,6 +843,11 @@ def open_window(app, window=None):
     ttk.Label(follow_controls, text='绿色行表示当前位置；自动复制会替换剪贴板内容，不在路线中时不操作。',
               style='Muted.TLabel', wraplength=1200).grid(row=3, column=0, columnspan=2, sticky='ew')
     app.localizer.register(refresh_follow)
+    from info_overlay import OverlayController, overlay_text
+    overlay_controller = OverlayController(follow_controls, app,
+        lambda: overlay_text(state['info'], position.index, follow_enabled.get(),
+                             follow_state['location'].timestamp if follow_state['location'] else '', tr,
+                             follow_state['fsd_health']))
 
     def render_results():
         if not win.winfo_exists():
@@ -1103,9 +1114,9 @@ def open_window(app, window=None):
                         journal_state['location'] = location
                         render_journal()
                 elif event == 'follow':
-                    generation, location, failure = result
+                    generation, location, failure, health = result
                     if follow_enabled.get() and generation == follow_state['generation']:
-                        follow_state.update(location=location, error=failure)
+                        follow_state.update(location=location, error=failure, fsd_health=health)
                         refresh_follow()
                 else:
                     pending = state['pending']
@@ -1128,6 +1139,7 @@ def open_window(app, window=None):
             stop.set()
             preview_closed.set()
             follow_state['stop'].set()
+            overlay_controller.close()
             selected.trace_remove('write', selected_trace)
             cargo.trace_remove('write', cargo_trace)
             for variable, trace in leg_traces:
@@ -1160,6 +1172,7 @@ def open_window(app, window=None):
     win.render_results = render_results
     win.journal_state, win.journal_status = journal_state, journal_status
     win.follow_variables = dict(enabled=follow_enabled, auto_copy=auto_copy)
+    win.info_overlay = overlay_controller
     win.follow_state, win.follow_position, win.follow_text = follow_state, position, follow_text
     win.refresh_follow, win.restart_follow = refresh_follow, restart_follow
     try:

@@ -99,7 +99,19 @@ Enable **Auto-copy planned next system** to put the next system's plain name in 
 - If a system occurs multiple times and its position is ambiguous, nothing is guessed or copied. Select the matching row and click **Confirm selected position**.
 - Both switches default to off on every launch. Disabling following or closing the app stops reading. Reading, matching and auto-copying require no additional network requests.
 
-This follows the last confirmed Journal position, not live in-game navigation. Check the timestamp, next system and refuelling conditions yourself. No floating overlay is provided.
+This follows the last confirmed Journal position, not live in-game navigation. Check the timestamp, next system and refuelling conditions yourself.
+
+### Read-only information overlay (Windows)
+
+In the results area, enable **Show overlay (click-through)**. This is a borderless, always-on-top information display, not an interactive panel: it has no buttons, cannot be clicked or dragged, and does not take keyboard focus. Mouse input passes to the application underneath it. Hide it using the same switch in the main window.
+
+Enable **Follow game position** separately to display the confirmed current system, planned next system/distance, route position, remaining jumps, build and Journal timestamp. Enabling the overlay does not start Journal reading, copy anything or submit a route. Outside the route, or when the position is unknown/ambiguous, it hides quietly rather than keeping stale navigation on screen. Incomplete/imported routes retain their warnings.
+
+All settings are in the main window: select a screen corner, horizontal/vertical margin, font size (10–28) and opacity (35–100%), then click **Apply overlay settings**. Placement uses the monitor containing the main window and is clamped to its work area. The overlay remains independent when the main window is minimized. Appearance and language follow the main application. Preferences are remembered on normal exit, but **visibility always starts off**.
+
+The overlay also shows **FSD health (Journal snapshot)**: **above 85% green; 80–85% inclusive yellow; below 80% red**. This comes only from the FSD module's `Health` in the latest local `Loadout`, with its own record timestamp. It is not a live damage meter: neutron jumps do not cause the tool to estimate durability loss. Missing/invalid data shows unknown; ship/commander changes, fitting changes or repair events clear the old value until a fresh snapshot arrives. It never uses a historical favourite's health. This shares the existing opt-in Journal follower and makes no network requests.
+
+Use windowed or borderless game mode. Exclusive fullscreen, secure desktops and other topmost applications can prevent the overlay from being visible; this has not been tested in-game. If the Windows click-through/non-activation setup cannot be created, the overlay stays off rather than falling back to a clickable window. No game injection, global input hooks or extra network access are used.
 
 ### Revisit results and avoid duplicate searches
 

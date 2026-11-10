@@ -27,6 +27,17 @@ def run(report_path):
             win = app.route_window(as_root=True)
             assert win is root
             assert not any(variable.get() for variable in win.follow_variables.values())
+            assert not win.info_overlay.enabled.get()
+            assert win.info_overlay.native is None
+            win.info_overlay.variables['font_size'].set('20')
+            win.info_overlay.apply()
+            if sys.platform == 'win32':
+                win.info_overlay.enabled.set(True)
+                win.info_overlay.refresh()
+                assert win.info_overlay.enabled.get()
+                assert win.info_overlay.native.hwnd
+                win.info_overlay.enabled.set(False)
+                win.info_overlay.refresh()
             preview = win.show_route_map()
             root.update_idletasks()
             assert preview.points == []
@@ -61,6 +72,7 @@ def run(report_path):
             # commands must not start a reader or enable them on next launch.
             win.follow_variables['enabled'].set(True)
             win.follow_variables['auto_copy'].set(True)
+            win.info_overlay.enabled.set(True)  # Not persisted, just like following.
             app.close()
             root = tk.Tk()
             root.withdraw()
@@ -76,6 +88,9 @@ def run(report_path):
             assert win.leg_state['overrides'][1]['cargo'] == '3'
             assert app.journal_directory == str(Path(directory) / 'chosen-journals')
             assert not any(variable.get() for variable in win.follow_variables.values())
+            assert not win.info_overlay.enabled.get()
+            assert win.info_overlay.native is None
+            assert app.overlay_settings['font_size'] == 20
             follower.assert_not_called()
             report['dpi_awareness'] = process_dpi_awareness()
             if sys.platform == 'win32':

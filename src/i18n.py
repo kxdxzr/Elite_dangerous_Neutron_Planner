@@ -2,6 +2,22 @@
 import re
 
 CATALOG = {
+    'FSD 耐久（日志快照）': 'FSD health (Journal snapshot)', '耐久记录时间': 'Health record time',
+    '只读信息悬浮窗': 'Read-only information overlay',
+    '显示悬浮窗（鼠标穿透）': 'Show overlay (click-through)',
+    '屏幕位置': 'Screen position', '字号': 'Font size', '不透明度 %': 'Opacity %',
+    '水平边距 px': 'Horizontal margin px', '垂直边距 px': 'Vertical margin px',
+    '应用悬浮窗设置': 'Apply overlay settings',
+    '右上角': 'Top right', '左上角': 'Top left', '右下角': 'Bottom right', '左下角': 'Bottom left',
+    '路线信息悬浮窗': 'Route information overlay',
+    '请在主窗口开启“跟随游戏位置”。': 'Enable Follow game position in the main window.',
+    '下一跳距离': 'Next jump distance', '剩余跳数': 'Remaining jumps',
+    '位置以主窗口所在屏幕为准；悬浮窗不可点击或拖动。仅窗口化／无边框模式可用，独占全屏不保证显示。':
+        'Uses the main window’s monitor. The overlay cannot be clicked or dragged. Use windowed/borderless mode; exclusive fullscreen may hide it.',
+    '悬浮窗设置无效：字号 10–28，不透明度 35–100，边距 0–2000。':
+        'Invalid overlay settings: font 10–28, opacity 35–100, margins 0–2000.',
+    '无法创建安全的鼠标穿透悬浮窗，已关闭。':
+        'Could not create a safe click-through overlay; disabled.',
     '导入航线的完整性未确认，仍要导出文件中的记录？':
         'The imported route is not confirmed complete. Export the file records anyway?',
     '导入路线 CSV': 'Import route CSV', '正在导入 CSV（不联网）…': 'Importing CSV (offline)…',

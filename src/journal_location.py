@@ -111,8 +111,10 @@ class JournalFollower:
         self.last_scan = float('-inf')
         self.offset, self.pending, self.location = 0, b'', None
         self.last_read_bytes = 0
+        self.fsd_health = None
 
     def _snapshot(self):
+        self.fsd_health = None
         stat = self.path.stat()
         self.identity = (stat.st_dev, stat.st_ino)
         self.offset = stat.st_size
@@ -129,6 +131,8 @@ class JournalFollower:
             # A fresh session may have only a Fileheader so far. Its future
             # appended Location will be read, without using an older session.
             self.location = None
+        from journal_health import read_current_health
+        self.fsd_health = read_current_health(self.directory, JOURNAL_NAME.fullmatch(self.path.name).group(1))
 
     def poll(self):
         self.last_read_bytes = 0
@@ -156,8 +160,11 @@ class JournalFollower:
         self.pending = lines.pop()
         if len(self.pending) > MAX_LINE_BYTES or any(len(line) > MAX_LINE_BYTES for line in lines):
             self.location = None
+            self.fsd_health = None
             raise ValueError('日志行过长，无法安全读取当前位置。')
+        from journal_health import update_health
         for line in lines:
+            self.fsd_health = update_health(self.fsd_health, line)
             try:
                 location = parse_location(line, self.path.name)
                 if location is not None:

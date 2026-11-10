@@ -9,11 +9,13 @@ from localized_tk import ttk, messagebox
 from runtime_paths import data_file
 import session_store
 from ui_display import initialize_display
+from info_overlay import settings as overlay_settings
 
 class App:
     def __init__(self, root):
         self.root, self.window = root, None
         self.settings = session_store.load(data_file('settings.json'))
+        self.overlay_settings = overlay_settings(self.settings.get('overlay'))
         saved_journal = self.settings.get('journal_directory', '')
         self.journal_directory = saved_journal if isinstance(saved_journal, str) else ''
         self.localizer = Localizer(root, self.settings.get('language', 'zh'))
@@ -77,6 +79,7 @@ class App:
     def close(self):
         settings = dict(language=self.localizer.language, appearance=self.appearance_manager.mode)
         settings['journal_directory'] = self.journal_directory
+        settings['overlay'] = dict(self.overlay_settings)
         if self.window is not None and self.window.winfo_exists():
             settings['route'] = {key: variable.get() for key, variable in self.window.route_variables.items()}
             settings['waypoints'] = list(self.window.route_state['points'])

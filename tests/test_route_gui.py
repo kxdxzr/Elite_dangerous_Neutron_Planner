@@ -389,6 +389,68 @@ class RouteGuiTests(unittest.TestCase):
         self.assertIs(win.route_state['info'], original)
         self.assertNotIn('disabled', button.state())
 
+    def test_overlay_is_opt_in_passive_and_hides_outside_route(self):
+        from unittest.mock import Mock
+        win = self.follow_window(['Z', 'B', 'A'])
+        controller = win.info_overlay
+        self.assertFalse(controller.enabled.get())
+        self.assertIsNone(controller.native)
+        native = Mock()
+        controller.factory = Mock(return_value=native)
+        with patch.object(tool, 'http_json') as http, patch.object(tool, 'plan') as plan, \
+                patch('journal_location.JournalFollower') as follower, \
+                patch.object(win, 'clipboard_clear') as clipboard:
+            controller.enabled.set(True)
+            controller.refresh()
+            self.assertIn('请在主窗口开启', native.show.call_args.args[0])
+            self.assertFalse(win.follow_variables['enabled'].get())
+            win.follow_variables['enabled'].set(True)
+            self.feed_position(win, 'Z')
+            self.assertIn('计划下一跳: B', native.show.call_args.args[0])
+            win.result_tree.sort_by('name')
+            controller.refresh()
+            self.assertIn('计划下一跳: B', native.show.call_args.args[0])
+            before = native.show.call_count
+            self.feed_position(win, 'Off route')
+            self.assertEqual(native.show.call_count, before)
+            self.assertTrue(native.hide.called)
+            self.assertEqual(win.follow_text.get(), '')
+            self.feed_position(win, 'B', '2026-10-23T12:01:00Z')
+            self.app.set_language('en')
+            self.assertIn('Planned next system: A', native.show.call_args.args[0])
+            controller.enabled.set(False)
+            controller.refresh()
+            native.hide.assert_called()
+            http.assert_not_called()
+            plan.assert_not_called()
+            follower.assert_not_called()
+            clipboard.assert_not_called()
+        win.destroy()
+        native.close.assert_called_once()
+        self.assertTrue(controller.closed)
+        self.assertNotIn(controller.refresh, self.app.localizer.callbacks)
+
+    def test_overlay_settings_validate_and_native_failure_fails_closed(self):
+        from unittest.mock import Mock
+        win = self.app.route_window()
+        controller = win.info_overlay
+        original = dict(self.app.overlay_settings)
+        controller.variables['opacity'].set('0')
+        controller.apply()
+        self.assertEqual(self.app.overlay_settings, original)
+        controller.variables['opacity'].set('60')
+        controller.variables['font_size'].set('20')
+        controller.variables['corner'].set('左下角')
+        controller.apply()
+        self.assertEqual(self.app.overlay_settings['opacity'], 60)
+        self.assertEqual(self.app.overlay_settings['corner'], 'bottom_left')
+        controller.factory = Mock(side_effect=OSError('Unavailable native safety'))
+        controller.enabled.set(True)
+        controller.refresh()
+        self.assertFalse(controller.enabled.get())
+        self.assertIsNone(controller.native)
+        self.assertIn('已关闭', controller.notice.get())
+
     def test_single_page_reaches_results_at_smaller_sizes(self):
         window = self.app.route_window()
         for size in ('1400x850', '1100x700'):
@@ -904,18 +966,22 @@ class RouteGuiTests(unittest.TestCase):
 
     def test_follow_worker_delivers_confirmed_position_without_network(self):
         from journal_location import JournalLocation
+        from journal_health import FsdHealth
         with patch('journal_location.JournalFollower') as factory, patch.object(tool, 'plan') as plan:
             factory.return_value.poll.return_value = JournalLocation('A', '2026-10-23T12:00:00Z', 'Journal.synthetic.01.log')
+            factory.return_value.fsd_health = FsdHealth(.85, '2026-10-23T11:00:00Z', 1, 'asp')
             win = self.follow_window(['A', 'B'])
             buttons = {getattr(w, '_raw_text', ''): w for w in self.widgets(win)}
             with patch.object(win, 'clipboard_clear'), patch.object(win, 'clipboard_append') as append:
                 buttons['跟随游戏位置'].invoke()
                 self.wait_for(lambda: win.follow_state['location'] is not None)
+                self.assertEqual(win.follow_state['fsd_health'].value, .85)
                 append.assert_not_called()
                 buttons['自动复制计划下一跳'].invoke()
                 append.assert_called_once_with('B')
                 stopped = win.follow_state['stop']
                 buttons['跟随游戏位置'].invoke()
                 self.assertTrue(stopped.is_set())
+                self.assertIsNone(win.follow_state['fsd_health'])
                 self.assertEqual(append.call_count, 1)
             plan.assert_not_called()

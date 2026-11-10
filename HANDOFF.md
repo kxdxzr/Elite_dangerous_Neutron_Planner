@@ -6,13 +6,73 @@
 
 - 本地：`E:/opencode/bridge/Elite_dangerous_Neutron_Planner`
 - GitHub：https://github.com/kxdxzr/Elite_dangerous_Neutron_Planner
-- 当前开发分支：`dev`，远端 `origin`；`main` 保留 v0.1.0 发布代码。使用 `git status` / `git log -3` 查看实时状态。
+- 当前开发分支：`feature/info-overlay`（从 dev 的 d763c8d 创建）；`dev` 按用户要求保留为备份，`main` 保留 v0.1.0 发布代码。使用 `git status` / `git log -3` 查看实时状态。
 - 拆分基线提交：`1d3413462f0d31554e0ce35772a90fd44485311a`。
 - 独立版本：`0.1.0`，位于 `src/export_metadata.py`。
 - 用户已明确授权发布 `v0.1.0` Release；发布包包含 Windows EXE、源码及 SHA-256 校验文件。
 - CI 基线：https://github.com/kxdxzr/Elite_dangerous_Neutron_Planner/actions/runs/39213832840
 - Windows 构建附件：该运行的 `EliteDangerousNeutronPlanner-Windows` artifact。
 - 本地 EXE：`dist/EliteDangerousNeutronPlanner.exe`，不纳入 Git。
+
+## 最新：只读信息悬浮窗（本地尚未提交／上传）
+
+2026-11-10 按用户要求准备上传功能改动，不包含私人 Journal 和配船文件；
+完整隔离测试 149 项通过，源码与重新构建的预览 EXE 离线冒烟通过，EXE 报告
+`frozen=true`、DPI awareness=1。预览 EXE 现包含 FSD 耐久颜色；低于 80% 的
+额外文字维修提醒仅为讨论提议，尚未实现。无游戏内验证。dev 继续保留为备份。
+本段下方关于未重新构建 EXE 的描述是本轮之前的历史状态。
+
+后续新增 FSD 耐久颜色显示：大于 85% 绿，80%～85%（含边界）黄，低于 80% 红。
+`src/journal_health.py` 从当前会话最近 Loadout 的 FrameShiftDrive.Health（0..1）
+读取，要求 ShipID／Ship／带时区时间及唯一 FSD 槽位，缺失／无效即未知，不回退旧值。
+复用 JournalFollower 现有增量读取，初始／换卷／截断时有界读取健康快照；新会话
+不沿用旧值。切船／指挥官／配装变化／维修事件清空，等待新 Loadout，不按中子
+跳跃次数或维修费用推算。工作线程随位置事件一起送健康快照，健康变化即使位置
+不变也会刷新；关闭／换目录／错误时清旧值。
+悬浮窗文字新增“FSD 耐久（日志快照）”和独立耐久记录时间；不是实时耐久。
+原生 GDI 按逻辑行测量／绘制，只有耐久行使用阈值颜色，其他文字仍跟随主题。
+本轮 149 项隔离测试及源码离线冒烟通过（ok=true、DPI=1），compileall／diff 检查
+通过，未读私人 Journal、未联网；尚未为此变化重新构建 EXE 或提交／上传。
+此前 `dist/overlay-preview/EliteDangerousNeutronPlanner.exe` 仍是不含耐久显示的构建。
+
+用户明确 dev 仅作备份，故在 `feature/info-overlay` 开发，未改变 dev/main 指针，
+未迁移会话或修改工作区绑定。用户要求悬浮窗纯显示、不可点击、不抢焦点。
+
+- `src/info_overlay.py`：原生 Win32 独立无 owner 顶层窗口，不是 Tk Toplevel。
+  WS_EX_LAYERED + WS_EX_TRANSPARENT 实现跨程序鼠标穿透，WS_EX_NOACTIVATE +
+  SWP_NOACTIVATE/SW_SHOWNOACTIVATE 防激活，WS_EX_TOOLWINDOW 排除任务栏／Alt-Tab，
+  WS_DISABLED 及 WM_NCHITTEST/WM_MOUSEACTIVATE 增加输入保护。不使用全局输入钩子、
+  不注入游戏。原生回调及 GDI 绘制始终在 Tk 主线程。回调保持进程级引用避免 GC。
+- 主窗口结果区新增“只读信息悬浮窗”：显示开关、四角位置、横纵边距、字号、
+  不透明度；应用设置后生效，位置取主窗口所在屏幕工作区，含负坐标及边界钳制。
+  悬浮窗本身无控件、无拖动／点击绑定。显示不读取 Journal、不复制、不规划。
+- 单独开启位置跟随后，显示原路线的当前星系、下一跳／距离、位置／剩余跳数、
+  出发配船、补油／中子标记及日志时间；部分／导入路线保留警告。不在路线中、
+  不明／歧义位置时静默隐藏。跟随未开启时只显示主窗口开启跟随的说明。
+- `settings.json.overlay` 仅存位置、字号及不透明度，严格限定范围；显示开关每次
+  启动默认关闭。新增 500 ms 主线程刷新，不增加日志轮询或网络。退出取消计时器、
+  销毁原生窗口并释放 GDI 资源。主题／语言跟随主程序，长文本按字体实际测量换行。
+  无法建立穿透／不激活保护时直接关闭，不降级成普通可点击窗口。
+- 验证：141 项隔离测试通过（含现有额外 2 项合成 Journal 导出脚本测试）；
+  原生 Windows 测试确认真实窗口可见、必要扩展样式存在、WindowFromPoint 不命中
+  悬浮窗、命中测试穿透、无 owner、禁用输入、显示／更新／重显不改变前台窗口、
+  关闭销毁；模型／GUI 测试覆盖退出清理、默认关闭、失败关闭、无网络／剪贴板副作用。
+- 源码及 EXE 离线冒烟均 ok=true，EXE frozen=true、DPI awareness=1；包含原生
+  悬浮窗创建／隐藏和设置重启恢复（显示仍关闭）。compileall、git diff --check 通过。
+  本地独立测试 EXE：`dist/overlay-preview/EliteDangerousNeutronPlanner.exe`，没有覆盖
+  原 dist 根目录 EXE 或 Release。未游戏内实测；推荐窗口化／无边框，独占全屏不保证。
+- 本轮后续工具环境 PATH 的 python 是 Microsoft Store 别名，实际验证使用
+  `C:/software/anaconda/python.exe`。PyInstaller 构建前须把 conda 本体、Library/bin、
+  DLLs 加入本进程 PATH，否则能生成 EXE 但漏收依赖 DLL；补齐 PATH 干净重建后
+  DLL 警告消失且实际 EXE 离线冒烟通过。不要发布初次漏 DLL 的产物。
+- 当前还存在其他任务的未跟踪 `journal-ships-export/`、`scripts/export_journal_ships.py`
+  和 `tests/test_export_journal_ships.py`，本轮未修改，未读取导出目录内容、未打入 EXE，
+  不得盲目 git add 全部文件或上传可能的私人配船导出。
+- 最后复读外部临时目录的源码冒烟报告时，read 工具因 external_directory 权限拒绝；
+  未绕过权限再次读取。源码冒烟进程已成功返回 0（按程序约定仅 ok 时返回 0），
+  EXE 冒烟的 ok=true/frozen=true/DPI=1 已由先前获准的执行输出确认。
+
+下方为前序功能及发布过程历史。
 
 用户授权将当前开发代码提交并推送到 `dev`：包括当前／历史 Journal 配船导入、
 俯视路线图、分段配船覆盖、原生／Spansh CSV 导入与可回读导出。最近验证为
